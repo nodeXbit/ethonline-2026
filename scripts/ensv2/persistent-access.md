@@ -115,7 +115,9 @@ node --test --test-isolation=none scripts/ensv2/access-record.test.mjs
 
 Tests execute the setup state machine against a local mocked chain, including interruption
 and retry after each confirmed write, prediction mismatch, pending guards, state preservation,
-and bridge errors/expiry. They send no transactions and use no environment files or keys.
+bridge errors/expiry, and safe failure reporting. They send no transactions and use no
+environment files or keys. Failures report their stage, operation, public custom error/RPC
+code, and any submitted transaction hash while redacting RPC URLs.
 
 Setup is not atomic. Concurrent external changes, reorgs, or permissions/expiry changes can
 stop verification; no automatic rollback is attempted. Run one setup process at a time.

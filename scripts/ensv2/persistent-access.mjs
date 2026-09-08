@@ -71,16 +71,56 @@ export async function requireNoPending(client, address) {
 // before submitting its request, and guard every setup write against unknown pending work.
 async function setupSend(context, contract, predictedResolver) {
   const { publicClient: client, account, walletClient } = context;
-  await requireNoPending(client, account.address);
-  const { request, result } = await client.simulateContract({ ...contract, account });
-  if (predictedResolver) requireCondition(isAddressEqual(result, predictedResolver),
-    'Simulated proxy does not match deterministic prediction.');
-  await requireNoPending(client, account.address);
-  const hash = await walletClient.writeContract(request);
-  console.log({ operation: contract.functionName, transactionHash: hash });
-  const receipt = await client.waitForTransactionReceipt({ hash });
-  requireCondition(receipt.status === 'success', 'Setup transaction receipt failed.');
-  return { result, receipt };
+  let hash;
+  try {
+    await requireNoPending(client, account.address);
+    const { request, result } = await client.simulateContract({ ...contract, account });
+    if (predictedResolver) requireCondition(isAddressEqual(result, predictedResolver),
+      'Simulated proxy does not match deterministic prediction.');
+    await requireNoPending(client, account.address);
+    hash = await walletClient.writeContract(request);
+    console.log({ operation: contract.functionName, transactionHash: hash });
+    const receipt = await client.waitForTransactionReceipt({ hash });
+    requireCondition(receipt.status === 'success', 'Setup transaction receipt failed.');
+    return { result, receipt };
+  } catch (error) {
+    // Preserve only public transaction context for the top-level safe error reporter.
+    if (error && typeof error === 'object') {
+      try {
+        error.persistentContext = { operation: contract.functionName, transactionHash: hash };
+      } catch {
+        // Never replace the original failure if an RPC library freezes its error object.
+      }
+    }
+    throw error;
+  }
+}
+
+const safeMessage = value => String(value).split(/\r?\n/, 1)[0]
+  .replace(/https?:\/\/\S+/gi, '[redacted URL]');
+
+// Avoid viem's full error rendering because it can include a credential-bearing RPC URL.
+// Contract error names/arguments, stages and transaction hashes are public chain data.
+export function publicErrorDetails(error, failureStage = stage) {
+  const chain = [];
+  for (let current = error; current && chain.length < 12; current = current.cause) chain.push(current);
+  const custom = chain.find(item => item?.data?.errorName);
+  const context = chain.find(item => item?.persistentContext)?.persistentContext;
+  const transactionHash = context?.transactionHash ??
+    chain.map(item => item?.transactionHash ?? item?.receipt?.transactionHash)
+      .find(value => /^0x[0-9a-fA-F]{64}$/.test(value ?? ''));
+  const report = {
+    stage: failureStage,
+    operation: context?.operation,
+    error: chain.find(item => item?.name && item.name !== 'Error')?.name ?? error?.name ?? 'Error',
+    message: safeMessage(chain.find(item => item?.shortMessage)?.shortMessage ??
+      error?.message ?? 'Unknown failure.'),
+    customError: custom?.data.errorName,
+    customErrorArgs: custom?.data.args,
+    rpcCode: chain.find(item => item?.code !== undefined)?.code,
+    transactionHash,
+  };
+  return Object.fromEntries(Object.entries(report).filter(([, value]) => value !== undefined));
 }
 
 export function registrationExpiry(snapshot, accessDeadline = snapshot.block.timestamp + accessDuration) {
@@ -233,9 +273,8 @@ export async function main(action = process.argv[2]) {
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   main().catch(error => {
-    // Only print our fixed pending message; raw RPC errors may contain credentials.
     console.error(error instanceof PendingSetupTransaction ? error.message :
-      `Persistent access ERROR during ${stage}. Check public transaction results, then rerun setup after they are confirmed.`);
+      'Persistent access ERROR', publicErrorDetails(error));
     process.exitCode = 1;
   });
 }

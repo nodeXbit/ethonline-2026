@@ -18,6 +18,7 @@ export const resolverRoles = (1n << 36n) | (1n << 164n);
 // https://github.com/ensdomains/contracts-v2/tree/97a57293f3b4279d94b571e678edb53ce62638f4/contracts/deployments/sepolia
 // The deployed factory takes ONE address and returns the current implementation.
 export const resolverAbi = parseAbi([
+  'error EACUnauthorizedAccountRoles(uint256 resource, uint256 roleBitmap, address account)',
   'function initialize(address admin, uint256 roleBitmap, bytes[] setters)',
   'function setData(bytes32 node, string key, bytes value)',
   'function data(bytes32 node, string key) view returns (bytes)',

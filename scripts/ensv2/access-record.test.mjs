@@ -6,7 +6,9 @@ import {
   accessDuration, credentialNode, decodeAccess, encodeAccess, expectedRegistry,
   isAuthorized, PermissionedResolverImpl, predictResolver, readCredential, resolverAbi, resolverRoles,
 } from './access-record.mjs';
-import { nextAccess, requireSameCredential, registrationExpiry, setupCredential } from './persistent-access.mjs';
+import {
+  nextAccess, publicErrorDetails, requireSameCredential, registrationExpiry, setupCredential,
+} from './persistent-access.mjs';
 import { normalizeUid, parseDetectionLine } from '../nfc/bridge.mjs';
 
 const owner = '0x1111111111111111111111111111111111111111';
@@ -303,6 +305,28 @@ test('expiry invariants replace fixed multi-day threshold', () => {
   assert.equal(registrationExpiry({ ...base, parentExpiry: 86501n }), 86501n);
   assert.throws(() => registrationExpiry({ ...base, parentExpiry: 90000n }, 90000n));
   assert.equal(registrationExpiry({ ...base, parentExpiry: 999999999n }), 100n + 365n * accessDuration);
+});
+
+test('persistent failures expose safe stage, operation, custom error and submitted hash', () => {
+  const transactionHash = `0x${'ab'.repeat(32)}`;
+  const cause = {
+    name: 'ContractFunctionRevertedError',
+    code: -32000,
+    shortMessage: 'The contract function reverted. See https://rpc.example/key-secret for details.',
+    data: { errorName: 'EACUnauthorizedAccountRoles', args: [9n, 1n << 36n, owner] },
+    persistentContext: { operation: 'setData', transactionHash },
+  };
+  const report = publicErrorDetails({
+    name: 'ContractFunctionExecutionError',
+    shortMessage: 'The contract function "setData" reverted via https://rpc.example/key-secret', cause,
+  }, 'inactive record initialization');
+  assert.deepEqual(report, {
+    stage: 'inactive record initialization', operation: 'setData',
+    error: 'ContractFunctionExecutionError',
+    message: 'The contract function "setData" reverted via [redacted URL]',
+    customError: 'EACUnauthorizedAccountRoles',
+    customErrorArgs: [9n, 1n << 36n, owner], rpcCode: -32000, transactionHash,
+  });
 });
 
 test('short parent lifetime uses invariants and insufficient lifetime stops before deployment', async () => {
