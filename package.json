@@ -1,0 +1,11 @@
+{
+  "name": "ethonline-2026",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "ensv2:setup": "node --env-file=.env.local scripts/ensv2/setup.mjs",
+    "ensv2:lifecycle": "node --env-file=.env.local scripts/ensv2/lifecycle.mjs"
+  },
+  "dependencies": { "viem": "^2.35.0" }
+}
