@@ -1,16 +1,10 @@
 import { pathToFileURL } from 'node:url';
-import { createPublicClient, http, isAddressEqual, zeroAddress } from 'viem';
+import { createPublicClient, http } from 'viem';
 import { normalize } from 'viem/ens';
 import { sepolia } from 'viem/chains';
-import {
-  ETHRegistry,
-  REGISTERED,
-  registryAbi,
-  requireCondition,
-} from '../ensv2/contracts.mjs';
+import { requireCondition } from '../ensv2/contracts.mjs';
+import { credentialLabel, parentName, readCredential } from '../ensv2/access-record.mjs';
 
-const expectedRegistry = '0x2d249472B83A453086254Acd8a42913D8e45a2Fd';
-const credentialLabel = 'cred-001';
 const serialBaud = 115200;
 const detectionPattern = /^ISO14443A tag detected; UID=(?:(?<uid4>(?:[0-9A-Fa-f]{2}:){3}[0-9A-Fa-f]{2}) \(4 bytes\)|(?<uid7>(?:[0-9A-Fa-f]{2}:){6}[0-9A-Fa-f]{2}) \(7 bytes\))$/;
 
@@ -83,52 +77,13 @@ function monitorSerialErrors(port) {
   return { promise, stop: () => port.off('error', fail) };
 }
 
-async function readAuthorization(parentLabel) {
+export async function readAuthorization() {
   const publicClient = createPublicClient({
     chain: sepolia,
     transport: http(process.env.SEPOLIA_RPC_URL?.trim() || undefined),
   });
-  const chainId = await publicClient.getChainId();
-  requireCondition(chainId === 11155111, 'RPC must be Sepolia (11155111).');
-
-  const block = await publicClient.getBlock();
-  const read = (address, functionName, args) => publicClient.readContract({
-    address,
-    abi: registryAbi,
-    functionName,
-    args,
-    blockNumber: block.number,
-  });
-  const parentTokenId = await read(ETHRegistry, 'findTokenId', [parentLabel]);
-  const [parentOwner, registry] = await Promise.all([
-    read(ETHRegistry, 'getOwner', [parentTokenId]),
-    read(ETHRegistry, 'getSubregistry', [parentLabel]),
-  ]);
-  requireCondition(!isAddressEqual(parentOwner, zeroAddress), 'Parent owner is the zero address.');
-  requireCondition(isAddressEqual(registry, expectedRegistry),
-    'Parent UserRegistry does not match the verified deployment.');
-  const code = await publicClient.getCode({ address: registry, blockNumber: block.number });
-  requireCondition(Boolean(code && code !== '0x'), 'UserRegistry bytecode is absent.');
-
-  const tokenId = await read(registry, 'findTokenId', [credentialLabel]);
-  const [state, owner, expiry] = await Promise.all([
-    read(registry, 'getState', [tokenId]),
-    read(registry, 'getOwner', [tokenId]),
-    read(registry, 'getExpiry', [tokenId]),
-  ]);
-  requireCondition(state.tokenId === tokenId && state.expiry === expiry,
-    'Inconsistent credential state reads.');
-
-  return {
-    block,
-    registry,
-    tokenId,
-    state,
-    owner,
-    expiry,
-    authorized: state.status === REGISTERED &&
-      isAddressEqual(owner, parentOwner) && expiry > block.timestamp,
-  };
+  requireCondition(await publicClient.getChainId() === 11155111, 'RPC must be Sepolia (11155111).');
+  return readCredential(publicClient);
 }
 
 let stage = 'configuration';
@@ -136,7 +91,8 @@ async function main() {
   const serialPort = process.env.NFC_SERIAL_PORT?.trim();
   requireCondition(Boolean(serialPort), 'NFC_SERIAL_PORT is required.');
   const configuredUid = normalizeUid(process.env.NFC_DEMO_UID ?? '');
-  const { parent, label: parentLabel } = parentDetails(process.env.ENS_PARENT_NAME);
+  const { parent } = parentDetails(process.env.ENS_PARENT_NAME);
+  requireCondition(parent === parentName, 'This demo requires demo-access.eth.');
 
   stage = 'serial input';
   let port;
@@ -158,7 +114,7 @@ async function main() {
       console.log(`CREDENTIAL: ${credentialLabel}.${parent}`);
       stage = 'Sepolia authorization read';
       const result = await Promise.race([
-        readAuthorization(parentLabel),
+        readAuthorization(),
         serialErrors.promise,
       ]);
       console.log({
@@ -167,7 +123,10 @@ async function main() {
         tokenId: result.tokenId.toString(),
         status: result.state.status,
         owner: result.owner,
-        expiry: result.expiry.toString(),
+        registryExpiry: result.expiry.toString(),
+        resolver: result.resolver,
+        'access.active': result.access?.active ?? 'NOT CONFIGURED',
+        'access.validUntil': result.access?.validUntil.toString() ?? 'NOT CONFIGURED',
       });
       stage = 'serial close';
       await Promise.race([closePort(port), serialErrors.promise]);
@@ -184,7 +143,7 @@ async function main() {
 const isDirectRun = process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url;
 if (isDirectRun) {
   main().catch(() => {
-    console.error(`NFC bridge stopped during ${stage}. No authorization decision was produced.`);
+    console.error(`NFC bridge ERROR during ${stage}. No authorization decision was produced.`);
     process.exitCode = 1;
   });
 }
