@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Establish the first ENSv2 Sepolia vertical slice, keeping ENSv2 authoritative for digital access credential state and connecting it to the validated ESP32-S3 + PN532 NFC path.
+Define and implement the prototype mapping from a physical NFC identifier to the already validated ENSv2 credential state.
 
 ## Done
 
@@ -19,13 +19,11 @@ Establish the first ENSv2 Sepolia vertical slice, keeping ENSv2 authoritative fo
 - Project direction selected: open physical-access credential prototype backed by ENSv2 on Sepolia.
 - Primary sponsor selected: ENS / ENSv2.
 - Local ESP32-S3 serial test and PN532 NFC tag-reading firmware completed.
+- First ENSv2 Sepolia vertical slice: DONE. `demo-access.eth` is attached to UserRegistry `0x2d249472B83A453086254Acd8a42913D8e45a2Fd`; register/read/unregister lifecycle passed with ENSv2 authoritative for authorization state.
 
 ## Next
 
-1. Confirm the smallest ENSv2 Sepolia write/read path required for credential state.
-2. Implement and verify that ENSv2 vertical slice independently of the hardware loop.
-3. Define the prototype mapping between an NFC UID identifier and ENSv2 credential state.
-4. Connect the validated NFC interaction to the ENSv2-backed access decision.
+1. Define and implement the prototype mapping from a physical NFC identifier to the already validated ENSv2 credential state.
 
 ## Blockers
 
@@ -37,3 +35,5 @@ None currently.
 - ENSv2 integration learning may delay the first vertical slice.
 - A static NFC UID is clonable and is suitable only as a prototype identifier, not secure proof of ownership.
 - ENSv2 must remain central and authoritative rather than becoming a cosmetic sponsor integration.
+- The ENSv2 credential tokenId/resource is mutable across unregister; the logical ENS name/label is the stable application reference.
+- The completed slice is a prototype and does not claim production security.
