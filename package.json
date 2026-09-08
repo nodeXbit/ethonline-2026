@@ -5,7 +5,13 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "ensv2:setup": "node --env-file=.env.local scripts/ensv2/setup.mjs",
-    "ensv2:lifecycle": "node --env-file=.env.local scripts/ensv2/lifecycle.mjs"
+    "ensv2:lifecycle": "node --env-file=.env.local scripts/ensv2/lifecycle.mjs",
+    "nfc:bridge": "node --env-file=.env.nfc.local scripts/nfc/bridge.mjs",
+    "ensv2:issue": "node --env-file=.env.local scripts/ensv2/credential-state.mjs issue",
+    "ensv2:revoke": "node --env-file=.env.local scripts/ensv2/credential-state.mjs revoke"
   },
-  "dependencies": { "viem": "^2.35.0" }
+  "dependencies": {
+    "serialport": "^13.0.0",
+    "viem": "^2.35.0"
+  }
 }

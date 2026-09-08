@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Define and implement the prototype mapping from a physical NFC identifier to the already validated ENSv2 credential state.
+Design and validate the smallest persistent-credential access lifecycle where the ENSv2 credential can survive after physical access expires, instead of using unregister/burn as the final product model.
 
 ## Done
 
@@ -20,10 +20,11 @@ Define and implement the prototype mapping from a physical NFC identifier to the
 - Primary sponsor selected: ENS / ENSv2.
 - Local ESP32-S3 serial test and PN532 NFC tag-reading firmware completed.
 - First ENSv2 Sepolia vertical slice: DONE. `demo-access.eth` is attached to UserRegistry `0x2d249472B83A453086254Acd8a42913D8e45a2Fd`; register/read/unregister lifecycle passed with ENSv2 authoritative for authorization state.
+- Physical NFC → ENSv2 authorization vertical slice: PASS. The same physical tag (`91:2D:E3:06`) produced `DENY → ALLOW → DENY` solely from ENSv2 credential state for `cred-001.demo-access.eth`.
 
 ## Next
 
-1. Define and implement the prototype mapping from a physical NFC identifier to the already validated ENSv2 credential state.
+1. Design and validate the smallest persistent-credential access lifecycle where the ENSv2 credential can survive after physical access expires, instead of using unregister/burn as the final product model.
 
 ## Blockers
 

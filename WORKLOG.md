@@ -23,3 +23,14 @@ No product code has been written yet.
 - Registered `cred-001.demo-access.eth` with transaction `0xde2447b4146cb1687428e43abf51dac3f748be6dc52f744474a48e1bbbe60dd9` (block `11663688`), read `REGISTERED` with the DEV wallet as owner, and produced `AUTHORIZATION: ALLOW`.
 - Unregistered it with transaction `0x65c2d6a6b8ad86d365541d57a26b83d3222ffce2eadb42f84bcdd0f91ac35d91` (block `11663690`), read `AVAILABLE` with zero owner, and produced `AUTHORIZATION: DENY`.
 - Key learning: ENSv2 is verified as load-bearing authorization state. The credential tokenId/resource changed after unregister, so the logical ENS name/label is the stable application reference.
+
+## 2026-09-09
+
+- Completed the physical NFC → ENSv2 authorization demo with physical UID `91:2D:E3:06`: ISO14443A tag → ESP32-S3 + PN532 over I2C → 115200-baud serial UID → Node PC bridge → Sepolia ENSv2 read.
+- The bridge resolved `demo-access.eth` to UserRegistry `0x2d249472B83A453086254Acd8a42913D8e45a2Fd` and mapped the UID to `cred-001.demo-access.eth`.
+- Revoked read at block `11663898`: status `AVAILABLE` (0), zero owner, and result `AUTHORIZATION: DENY`.
+- Issued with transaction `0x965260d7a766e0d0bbaa0abe110487723a229cd06d81b88acf770b42a5a98d35` in block `11663902`; result `CREDENTIAL STATE: ACTIVE`. The same physical tag then read at block `11663904` as `REGISTERED` (2), owner `0x4C60a5AD311510543B56d0408872A52e4AEEe19C`, and `AUTHORIZATION: ALLOW`.
+- Revoked with transaction `0xd538c72e6ec5a59e4c7722db0c4ce63a98731f832a76d351fa68c5c7b9803c69` in block `11663907`; result `CREDENTIAL STATE: REVOKED`. The same physical tag then read at block `11663909` as `AVAILABLE` (0), zero owner, and `AUTHORIZATION: DENY`.
+- The logical ENS label remained `cred-001.demo-access.eth`, while the current tokenId changed after unregister (`...167041` → `...167042`); tokenId must therefore be rediscovered and is not a permanent application identifier.
+- The static NFC UID is only a clonable prototype/demo identifier, not proof of possession or production security.
+- Conclusion: ENSv2 is verified as load-bearing authorization state in the physical demo. The next product question is a persistent credential lifecycle that can survive after physical access expires rather than treating unregister/burn as the final model.
