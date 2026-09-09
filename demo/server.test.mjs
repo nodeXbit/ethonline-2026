@@ -4,6 +4,9 @@ import test from 'node:test';
 import {
   createDemoHandler, demoAuthority, demoOrigin, publicCredential, safePublicError,
 } from './server.mjs';
+import {
+  accessTransactionState, PendingAccessTransaction, RevertedAccessTransaction,
+} from '../scripts/ensv2/persistent-access.mjs';
 
 const owner = '0x1111111111111111111111111111111111111111';
 const resolver = '0x2222222222222222222222222222222222222222';
@@ -138,6 +141,7 @@ for (const action of ['activate', 'deactivate']) {
       assert.equal(JSON.parse(first.text).changed, true);
       assert.deepEqual(JSON.parse(second.text), {
         changed: false,
+        recovered: false,
         transactionHash: null,
         credential: publicCredential(action === 'activate'
           ? snapshot({ access: { active: true, validUntil: 1_800_000_000n }, authorized: true })
@@ -167,6 +171,104 @@ test('safe errors expose only allowed fields and redact URLs', () => {
   assert.equal(result.message.includes('https://'), false);
   assert.equal(result.message.includes('private-token'), false);
   assert.equal(result.transactionHash, transactionHash);
+});
+
+test('unresolved submitted transaction returns HTTP 202 with public recovery evidence', async () => {
+  let writes = 0;
+  await withServer(async (port, state) => {
+    const response = await request(port, '/api/activate', {
+      method: 'POST', headers: validWriteHeaders,
+    });
+    assert.equal(response.status, 202);
+    assert.deepEqual(JSON.parse(response.text), {
+      pending: true,
+      transactionHash,
+      requestedState: 'ACTIVE',
+      transactionState: accessTransactionState.confirmationUnknown,
+    });
+    const blocked = await request(port, '/api/activate', {
+      method: 'POST', headers: validWriteHeaders,
+    });
+    assert.equal(blocked.status, 409);
+    assert.equal(JSON.parse(blocked.text).error.transactionHash, transactionHash);
+    assert.equal(writes, 1);
+
+    const pendingRead = JSON.parse((await request(port, '/api/credential')).text);
+    assert.deepEqual(pendingRead.recovery, {
+      pending: true,
+      transactionHash,
+      requestedState: 'ACTIVE',
+      transactionState: accessTransactionState.confirmationUnknown,
+    });
+
+    state.access.active = true;
+    state.authorized = true;
+    assert.equal((await request(port, '/api/credential')).status, 200);
+    const reconciled = await request(port, '/api/activate', {
+      method: 'POST', headers: validWriteHeaders,
+    });
+    assert.equal(reconciled.status, 200);
+    assert.equal(JSON.parse(reconciled.text).changed, false);
+    assert.equal(writes, 1);
+  }, { writeAccess: async () => {
+    writes++;
+    return { pending: true, transactionHash, requestedState: 'ACTIVE',
+      transactionState: accessTransactionState.confirmationUnknown };
+  } });
+});
+
+test('successful bounded recovery returns HTTP 200 with recovered evidence', async () => {
+  let writes = 0;
+  await withServer(async port => {
+    const response = await request(port, '/api/activate', {
+      method: 'POST', headers: validWriteHeaders,
+    });
+    const body = JSON.parse(response.text);
+    assert.equal(response.status, 200);
+    assert.equal(body.changed, true);
+    assert.equal(body.recovered, true);
+    assert.equal(body.transactionHash, transactionHash);
+    assert.equal(body.credential.authorization, 'ALLOW');
+    assert.equal(writes, 1);
+  }, { writeAccess: async () => {
+    writes++;
+    return { changed: true, recovered: true, transactionHash,
+      credential: snapshot({ access: { active: true, validUntil: 1_800_000_000n }, authorized: true }) };
+  } });
+});
+
+test('pending nonce returns HTTP 409 without invoking a write', async () => {
+  let writes = 0;
+  await withServer(async port => {
+    const response = await request(port, '/api/activate', {
+      method: 'POST', headers: validWriteHeaders,
+    });
+    assert.equal(response.status, 409);
+    assert.equal(JSON.parse(response.text).error.code, 'PREVIOUS_TRANSACTION_PENDING');
+    assert.equal(writes, 0);
+  }, { writeAccess: async () => {
+    writes++;
+    throw new PendingAccessTransaction();
+  }, readState: async () => {
+    throw new PendingAccessTransaction();
+  } });
+});
+
+test('confirmed revert returns a safe transaction hash without resubmission', async () => {
+  let writes = 0;
+  await withServer(async port => {
+    const response = await request(port, '/api/activate', {
+      method: 'POST', headers: validWriteHeaders,
+    });
+    const body = JSON.parse(response.text);
+    assert.equal(response.status, 500);
+    assert.equal(body.error.code, 'TRANSACTION_REVERTED');
+    assert.equal(body.error.transactionHash, transactionHash);
+    assert.equal(writes, 1);
+  }, { writeAccess: async () => {
+    writes++;
+    throw new RevertedAccessTransaction(transactionHash);
+  } });
 });
 
 test('security headers protect static and API responses and API is not cached', async () => {

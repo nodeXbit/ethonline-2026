@@ -6,7 +6,8 @@ import { sepolia } from 'viem/chains';
 import { readCredential, credentialLabel, parentName } from '../scripts/ensv2/access-record.mjs';
 import { connect, requireCondition } from '../scripts/ensv2/contracts.mjs';
 import {
-  accessStateAchieved, publicErrorDetails, updateAccess,
+  accessStateAchieved, PendingAccessTransaction, publicErrorDetails,
+  RevertedAccessTransaction, updateAccess,
 } from '../scripts/ensv2/persistent-access.mjs';
 
 export const demoHost = '127.0.0.1';
@@ -95,6 +96,7 @@ function validateWriteRequest(request) {
 
 export function createDemoHandler({ readState, writeAccess, loadStatic = readFile }) {
   let writePending = false;
+  let unresolvedWrite = null;
 
   return async function demoHandler(request, response) {
     const path = request.url;
@@ -123,7 +125,20 @@ export function createDemoHandler({ readState, writeAccess, loadStatic = readFil
         return;
       }
       try {
-        sendJson(response, 200, publicCredential(await readState()));
+        const snapshot = await readState();
+        if (unresolvedWrite && accessStateAchieved(snapshot, unresolvedWrite.action)) {
+          unresolvedWrite = null;
+        }
+        const credential = publicCredential(snapshot);
+        if (unresolvedWrite) {
+          credential.recovery = {
+            pending: true,
+            transactionHash: unresolvedWrite.transactionHash,
+            requestedState: unresolvedWrite.requestedState,
+            transactionState: unresolvedWrite.transactionState,
+          };
+        }
+        sendJson(response, 200, credential);
       } catch (error) {
         sendJson(response, 502, { error: safePublicError(error, {
           code: 'READ_FAILED', stage: 'Sepolia credential read',
@@ -151,6 +166,12 @@ export function createDemoHandler({ readState, writeAccess, loadStatic = readFil
           message: 'Another Sepolia access update is still pending.', stage: 'write lock' } });
         return;
       }
+      if (unresolvedWrite) {
+        sendJson(response, 409, { error: { code: 'TRANSACTION_RECOVERY_PENDING',
+          message: 'A submitted Sepolia transaction still requires read-only reconciliation.',
+          stage: 'transaction recovery', transactionHash: unresolvedWrite.transactionHash } });
+        return;
+      }
 
       writePending = true;
       const action = path === '/api/activate' ? 'activate' : 'deactivate';
@@ -159,16 +180,37 @@ export function createDemoHandler({ readState, writeAccess, loadStatic = readFil
         const result = accessStateAchieved(before, action)
           ? { changed: false, transactionHash: null, credential: before }
           : await writeAccess(action);
+        if (result.pending) {
+          unresolvedWrite = {
+            action,
+            transactionHash: result.transactionHash,
+            requestedState: result.requestedState,
+            transactionState: result.transactionState,
+          };
+          sendJson(response, 202, {
+            pending: true,
+            transactionHash: result.transactionHash,
+            requestedState: result.requestedState,
+            transactionState: result.transactionState,
+          });
+          return;
+        }
         sendJson(response, 200, {
           changed: result.changed ?? true,
+          recovered: result.recovered ?? false,
           transactionHash: result.transactionHash,
           credential: publicCredential(result.credential),
         });
       } catch (error) {
-        const conflict = /Credential must be REGISTERED|access\.v1 is not configured/.test(
-          String(error?.message ?? ''));
+        const pendingTransaction = error instanceof PendingAccessTransaction;
+        const revertedTransaction = error instanceof RevertedAccessTransaction;
+        const conflict = pendingTransaction ||
+          /Credential must be REGISTERED|access\.v1 is not configured/.test(String(error?.message ?? ''));
         sendJson(response, conflict ? 409 : 500, { error: safePublicError(error, {
-          code: conflict ? 'INCOMPATIBLE_STATE' : 'WRITE_FAILED', stage: 'Sepolia access update',
+          code: pendingTransaction ? 'PREVIOUS_TRANSACTION_PENDING'
+            : revertedTransaction ? 'TRANSACTION_REVERTED'
+              : conflict ? 'INCOMPATIBLE_STATE' : 'WRITE_FAILED',
+          stage: revertedTransaction ? 'Sepolia transaction receipt' : 'Sepolia access update',
         }) });
       } finally {
         writePending = false;

@@ -59,6 +59,28 @@ export class PendingSetupTransaction extends Error {
   constructor() { super(pendingMessage); }
 }
 
+export const accessTransactionState = Object.freeze({
+  beforeSubmission: 'BEFORE_SUBMISSION',
+  submitted: 'SUBMITTED',
+  confirmedSuccess: 'CONFIRMED_SUCCESS',
+  confirmedRevert: 'CONFIRMED_REVERT',
+  confirmationUnknown: 'CONFIRMATION_UNKNOWN',
+});
+
+export class PendingAccessTransaction extends Error {
+  constructor() {
+    super('A previous Sepolia transaction is still pending. Wait for confirmation.');
+  }
+}
+
+export class RevertedAccessTransaction extends Error {
+  constructor(transactionHash) {
+    super('The submitted Sepolia access transaction reverted.');
+    this.transactionState = accessTransactionState.confirmedRevert;
+    this.persistentContext = { operation: 'setData', transactionHash };
+  }
+}
+
 export async function requireNoPending(client, address) {
   const [latest, pending] = await Promise.all([
     client.getTransactionCount({ address, blockTag: 'latest' }),
@@ -94,6 +116,15 @@ async function setupSend(context, contract, predictedResolver) {
     }
     throw error;
   }
+}
+
+async function requireNoPendingAccess(client, address) {
+  const [latest, pending] = await Promise.all([
+    client.getTransactionCount({ address, blockTag: 'latest' }),
+    client.getTransactionCount({ address, blockTag: 'pending' }),
+  ]);
+  if (pending > latest) throw new PendingAccessTransaction();
+  requireCondition(pending === latest, 'Unexpected DEV transaction count state.');
 }
 
 export function accessStateAchieved(snapshot, action) {
@@ -151,6 +182,59 @@ export function setupAccess(status, access, timestamp) {
 }
 
 const sameAccess = (a, b) => a?.active === b?.active && a?.validUntil === b?.validUntil;
+
+function verifyAccessUpdate(before, after, access, minimumBlock) {
+  requireCondition(after.block.number >= minimumBlock, 'Readback predates update.');
+  requireSameCredential(before, after);
+  requireCondition(sameAccess(after.access, access), 'Access readback mismatch.');
+}
+
+const defaultRecoveryDelays = [0, 250, 750];
+const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+async function recoverSubmittedAccess(context, {
+  transactionHash, before, access, receipt: knownReceipt,
+  recoveryDelays = defaultRecoveryDelays, sleep = delay,
+}) {
+  let receipt = knownReceipt;
+  for (const milliseconds of recoveryDelays) {
+    if (milliseconds > 0) await sleep(milliseconds);
+    if (!receipt) {
+      try {
+        receipt = await context.publicClient.getTransactionReceipt({ hash: transactionHash });
+      } catch {
+        continue;
+      }
+    }
+    if (receipt.status !== 'success') throw new RevertedAccessTransaction(transactionHash);
+    try {
+      const after = await readCredential(context.publicClient, { includeParent: true });
+      verifyAccessUpdate(before, after, access, receipt.blockNumber);
+      console.log({ operation: 'setData', transactionHash,
+        blockNumber: receipt.blockNumber.toString(), recovered: true });
+      return {
+        changed: true,
+        recovered: true,
+        pending: false,
+        transactionState: accessTransactionState.confirmedSuccess,
+        transactionHash,
+        blockNumber: receipt.blockNumber,
+        credential: after,
+      };
+    } catch {
+      // A successful receipt can precede a temporarily available authoritative readback.
+    }
+  }
+  return {
+    changed: true,
+    pending: true,
+    transactionState: receipt
+      ? accessTransactionState.confirmedSuccess
+      : accessTransactionState.confirmationUnknown,
+    transactionHash,
+    requestedState: access.active ? 'ACTIVE' : 'INACTIVE',
+  };
+}
 
 // Each iteration reconstructs the next step from confirmed chain state. No local checkpoint.
 export async function setupCredential(context) {
@@ -244,7 +328,7 @@ export async function setupCredential(context) {
   }
 }
 
-export async function updateAccess(context, action) {
+export async function updateAccess(context, action, recoveryOptions = {}) {
   requireCondition(action === 'activate' || action === 'deactivate',
     'Access action must be activate or deactivate.');
   stage = 'access update preflight';
@@ -252,24 +336,54 @@ export async function updateAccess(context, action) {
   if (accessStateAchieved(before, action)) {
     return {
       changed: false,
+      recovered: false,
+      pending: false,
+      transactionState: accessTransactionState.beforeSubmission,
       transactionHash: null,
       blockNumber: before.block.number,
       credential: before,
     };
   }
   const access = nextAccess(action, before.access, before.block.timestamp);
-  stage = 'simulated access update and receipt';
-  const transaction = await send(context, dataCall(before.resolver, access));
+  stage = 'access update pending nonce guard';
+  await requireNoPendingAccess(context.publicClient, context.account.address);
+  stage = 'simulated access update';
+  const { request } = await context.publicClient.simulateContract({
+    ...dataCall(before.resolver, access), account: context.account,
+  });
+  await requireNoPendingAccess(context.publicClient, context.account.address);
+  stage = 'access update submission';
+  const transactionHash = await context.walletClient.writeContract(request);
+  console.log({ operation: 'setData', transactionHash });
+  stage = 'access transaction receipt';
+  let receipt;
+  try {
+    receipt = await context.publicClient.waitForTransactionReceipt({ hash: transactionHash });
+  } catch {
+    return recoverSubmittedAccess(context, {
+      transactionHash, before, access, ...recoveryOptions,
+    });
+  }
+  if (receipt.status !== 'success') throw new RevertedAccessTransaction(transactionHash);
+  console.log({ operation: 'setData', transactionHash,
+    blockNumber: receipt.blockNumber.toString() });
   stage = 'access and persistent identity readback';
-  const after = await readCredential(context.publicClient, { includeParent: true });
-  requireCondition(after.block.number >= transaction.receipt.blockNumber,
-    'Readback predates update.');
-  requireSameCredential(before, after);
-  requireCondition(sameAccess(after.access, access), 'Access readback mismatch.');
+  let after;
+  try {
+    after = await readCredential(context.publicClient, { includeParent: true });
+    verifyAccessUpdate(before, after, access, receipt.blockNumber);
+  } catch {
+    return recoverSubmittedAccess(context, {
+      transactionHash, before, access, receipt, ...recoveryOptions,
+    });
+  }
   return {
     changed: true,
-    transactionHash: transaction.receipt.transactionHash,
-    blockNumber: transaction.receipt.blockNumber,
+    recovered: false,
+    pending: false,
+    transactionState: accessTransactionState.confirmedSuccess,
+    transactionHash,
+    blockNumber: receipt.blockNumber,
     credential: after,
   };
 }

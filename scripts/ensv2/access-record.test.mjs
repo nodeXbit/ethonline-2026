@@ -7,8 +7,8 @@ import {
   isAuthorized, PermissionedResolverImpl, predictResolver, readCredential, resolverAbi, resolverRoles,
 } from './access-record.mjs';
 import {
-  nextAccess, publicErrorDetails, requireSameCredential, registrationExpiry, setupCredential,
-  updateAccess,
+  accessTransactionState, nextAccess, PendingAccessTransaction, publicErrorDetails,
+  requireSameCredential, registrationExpiry, RevertedAccessTransaction, setupCredential, updateAccess,
 } from './persistent-access.mjs';
 import { normalizeUid, parseDetectionLine } from '../nfc/bridge.mjs';
 
@@ -102,7 +102,13 @@ function chain(options = {}) {
   const equals = isAddressEqual;
   const client = {
     getChainId: async () => state.chainId ?? 11155111,
-    getBlock: async () => ({ number: state.blockNumber, timestamp: state.timestamp }),
+    getBlock: async () => {
+      if (writes.length > 0 && state.readbackFailures > 0) {
+        state.readbackFailures--;
+        throw Error('Temporary credential readback failure');
+      }
+      return { number: state.blockNumber, timestamp: state.timestamp };
+    },
     getTransactionCount: async ({ blockTag }) => blockTag === 'pending' && state.pending ? 1 : 0,
     getCode: async args => {
       if (args.blockNumber !== undefined) assert.equal(args.blockNumber, state.blockNumber);
@@ -149,10 +155,22 @@ function chain(options = {}) {
         if (state.pendingAfterSimulation) state.pending = true;
         return { request, result: state.predictionMismatch ? resolver : predicted };
       }
+      if (state.pendingAfterSimulation) state.pending = true;
       return { request, result: request.functionName === 'register' ? 7n : undefined };
     },
     waitForTransactionReceipt: async () => {
+      if (state.waitReceiptFailures > 0) {
+        state.waitReceiptFailures--;
+        throw Error('Temporary receipt RPC failure');
+      }
       if (state.interruptAfter === writes.length) throw Error('Process interrupted after confirmed write');
+      return lastReceipt;
+    },
+    getTransactionReceipt: async () => {
+      if (state.recoveryReceiptFailures > 0) {
+        state.recoveryReceiptFailures--;
+        throw Error('Receipt not available');
+      }
       return lastReceipt;
     },
   };
@@ -181,7 +199,8 @@ function chain(options = {}) {
         state.expiry = request.args[5];
         state.pointer = request.args[3];
       } else throw Error('Unexpected write');
-      lastReceipt = { status: 'success', blockNumber: state.blockNumber, transactionHash: hash, logs };
+      lastReceipt = { status: state.receiptStatus ?? 'success', blockNumber: state.blockNumber,
+        transactionHash: hash, logs };
       return hash;
     } },
   };
@@ -235,14 +254,73 @@ test('activation renews an active but expired access deadline exactly once', asy
   assert.deepEqual(c.writes, ['setData']);
 });
 
-test('updateAccess cannot report success without requested confirmed readback', async () => {
+test('updateAccess cannot report confirmed state without requested readback', async () => {
   const stale = chain({ ...registered, access: inactive, ignoreAccessWrite: true });
-  await assert.rejects(updateAccess(stale.context, 'activate'), /readback mismatch/);
+  const unresolved = await updateAccess(stale.context, 'activate', {
+    recoveryDelays: [0], sleep: async () => {},
+  });
+  assert.equal(unresolved.pending, true);
+  assert.equal(unresolved.transactionState, accessTransactionState.confirmedSuccess);
+  assert.equal(unresolved.credential, undefined);
   assert.deepEqual(stale.writes, ['setData']);
 
   const failed = chain({ ...registered, access: inactive, noControl: true });
   await assert.rejects(updateAccess(failed.context, 'activate'));
   assert.deepEqual(failed.writes, []);
+});
+
+test('receipt RPC failure recovers by hash without a second write', async () => {
+  const c = chain({ ...registered, access: inactive, waitReceiptFailures: 1 });
+  const result = await updateAccess(c.context, 'activate', {
+    recoveryDelays: [0], sleep: async () => {},
+  });
+  assert.equal(result.recovered, true);
+  assert.equal(result.pending, false);
+  assert.equal(result.transactionState, accessTransactionState.confirmedSuccess);
+  assert.equal(result.credential.authorized, true);
+  assert.deepEqual(c.writes, ['setData']);
+});
+
+test('confirmed receipt recovers from a temporary credential readback failure', async () => {
+  const c = chain({ ...registered, access: inactive, readbackFailures: 1 });
+  const result = await updateAccess(c.context, 'activate', {
+    recoveryDelays: [0], sleep: async () => {},
+  });
+  assert.equal(result.recovered, true);
+  assert.equal(result.transactionState, accessTransactionState.confirmedSuccess);
+  assert.equal(result.credential.authorized, true);
+  assert.deepEqual(c.writes, ['setData']);
+});
+
+test('exhausted receipt recovery returns pending evidence without resubmission', async () => {
+  const c = chain({ ...registered, access: inactive, waitReceiptFailures: 1,
+    recoveryReceiptFailures: 2 });
+  const result = await updateAccess(c.context, 'activate', {
+    recoveryDelays: [0, 0], sleep: async () => {},
+  });
+  assert.equal(result.pending, true);
+  assert.equal(result.transactionState, accessTransactionState.confirmationUnknown);
+  assert.equal(result.requestedState, 'ACTIVE');
+  assert.match(result.transactionHash, /^0x[0-9a-f]{64}$/);
+  assert.deepEqual(c.writes, ['setData']);
+});
+
+test('pending DEV nonce blocks a new access action before or after simulation', async () => {
+  for (const pendingState of [{ pending: true }, { pendingAfterSimulation: true }]) {
+    const c = chain({ ...registered, access: inactive, ...pendingState });
+    await assert.rejects(updateAccess(c.context, 'activate'), PendingAccessTransaction);
+    assert.deepEqual(c.writes, []);
+  }
+});
+
+test('confirmed reverted access transaction retains its hash without resubmission', async () => {
+  const c = chain({ ...registered, access: inactive, receiptStatus: 'reverted' });
+  await assert.rejects(updateAccess(c.context, 'activate'), error => {
+    assert.ok(error instanceof RevertedAccessTransaction);
+    assert.match(error.persistentContext.transactionHash, /^0x[0-9a-f]{64}$/);
+    return true;
+  });
+  assert.deepEqual(c.writes, ['setData']);
 });
 
 test('fresh setup deploys, initializes inactive, then registers', async () => {

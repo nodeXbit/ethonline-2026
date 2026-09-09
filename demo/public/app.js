@@ -32,7 +32,7 @@ function setFeedback(message, tone = '') {
 }
 
 function isCredentialUsable(credential) {
-  return credential.status === 'REGISTERED' &&
+  return !credential.recovery?.pending && credential.status === 'REGISTERED' &&
     !zeroAddress.test(credential.owner) &&
     !zeroAddress.test(credential.resolver) && credential.access !== null;
 }
@@ -103,8 +103,12 @@ const changeAccess = createAccessActionHandler({
 
 actionButton.addEventListener('click', changeAccess);
 
-refresh().then(() => {
-  setFeedback('Authoritative ENSv2 state loaded.');
+refresh().then(async credential => {
+  if (credential.recovery?.pending) {
+    await changeAccess.recover(credential.recovery);
+  } else {
+    setFeedback('Authoritative ENSv2 state loaded.');
+  }
 }).catch(error => {
   card.classList.remove('is-loading');
   card.classList.add('is-unavailable');
