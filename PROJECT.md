@@ -12,3 +12,55 @@
 - Future layers: presentation/collectible behavior, dynamic metadata, loyalty, transferability, and programmable benefits may build on the persistent credential, but none is implemented yet.
 - Non-goals: production-grade access control, complex infrastructure, multiple superficial sponsor integrations, cryptographic NFC challenge-response, Android HCE, and unrelated Hermes/Knowledge OS work.
 - NFC security boundary: a static NFC UID is acceptable only as a prototype/demo identifier. It is clonable and must not be represented as secure proof of credential ownership or as anti-cloning security.
+
+## Sponsor strategy
+
+- Primary: ENS / ENSv2. ENSv2 remains load-bearing and authoritative.
+- Strong secondary candidate: Privy, only if implemented as a real product layer. The intended fit is embedded-wallet onboarding plus a real USDC financial flow for credential issuance; the same signer may also become the cryptographic access signer.
+- Strong secondary candidate: World, only if Selfie Check materially gates credential issuance or activation as a liveness/eligibility/continuity signal.
+- No secondary sponsor should be added if it weakens the ENS core, the demo, or submission readiness.
+- Arc is not required merely to use USDC or EIP-712 patterns.
+- Ledger, Chainlink, The Graph, Bazantic, and other sponsors remain off the critical path unless a later, already-complete core makes a genuinely load-bearing integration realistic.
+
+## Security upgrade direction
+
+The highest-value next product improvement is to replace trust in a static NFC UID with a fresh cryptographic holder proof.
+
+Preferred first implementation:
+
+```text
+door/verifier creates fresh challenge
+  -> wallet/mobile signer signs EIP-712 typed data
+  -> signature travels over the NFC/mobile presentation path
+  -> verifier checks the signer
+  -> verifier checks authoritative ENSv2 access state
+  -> ALLOW / DENY
+```
+
+Start with a simple embedded EOA signer before making an ERC-4337 smart wallet the credential owner. If smart-wallet ownership is added later, use standard ERC-1271/6492 verification rather than custom signature rules.
+
+## Planned product layers
+
+High-value layers already identified, but not yet implemented:
+
+- Privy embedded wallet / passkey onboarding.
+- Real USDC credential-issuance payment flow.
+- Android HCE/mobile NFC presentation.
+- Dynamic credential branding/metadata.
+- Credential transferability.
+- World Selfie Check before issuance/activation.
+- ERC-4337 smart-wallet UX after the simpler signer path works.
+- Loyalty, benefits, and consumable promotions built on the persistent credential model.
+
+Post-hackathon/commercial direction:
+
+- Aliro-compatible interoperability rather than inventing a new commercial lock standard.
+- Matter/commercial-lock integration only when justified by product requirements.
+- iOS contactless/HCE exploration after the Android/mobile proof is stable.
+
+## Pricing note
+
+No commercial credential price has been chosen.
+
+Any testnet USDC amount used during ETHOnline is a demo/payment-flow parameter, not a production pricing decision.
+

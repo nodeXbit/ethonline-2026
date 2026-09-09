@@ -58,3 +58,19 @@ No product code has been written yet.
 - The same physical tag `91:2D:E3:06` produced `DENY -> ALLOW -> DENY`. Visual QA confirmed immediate clear transitions, understandable pending feedback, one click per action, no manual refresh, and a credential card that never disappeared.
 - Identity remained REGISTERED with unchanged owner `0x4C60a5AD311510543B56d0408872A52e4AEEe19C`, tokenId `111633085976721986886445685281703791217854403259346662013299173065803998167042`, resolver `0x0B723c0C2170F2ea508F2f4e3e122C6c0782744C`, and registry expiry `1820447664`.
 - Main technical learning: visible state must always follow authoritative ENSv2 readback, and writes need distinct pre-submission retry and post-submission hash-recovery boundaries.
+
+### Targeted sponsor and architecture delta
+
+- Reopened Workshop Radar only for a targeted delta scan; broad ideation remained closed.
+- Reconfirmed ENS as the primary, load-bearing sponsor based on the already working ENSv2 Sepolia implementation.
+- Reclassified Privy as a strong secondary candidate only if the product adds a real financial flow. Proposed coherent flow: embedded wallet/onboarding -> testnet USDC payment -> ENSv2 credential issuance. Embedded wallet/account abstraction by itself is not treated as sufficient prize qualification.
+- Reclassified World as a strong secondary candidate if Selfie Check materially gates credential issuance or activation. Product language must treat Selfie Check as liveness/eligibility/continuity/abuse-prevention evidence, not as legal KYC.
+- Confirmed that Arc is not required merely to use USDC or EIP-712 patterns. Keep the current Sepolia-centered architecture unless a concrete requirement justifies another chain.
+- Identified the next security hardening target: a fresh EIP-712 challenge-response so the wallet/mobile signer proves control of the credential instead of relying on a clonable NFC UID.
+- Chose the simplest signer path first: embedded EOA/mobile signer before ERC-4337 smart-wallet ownership. If smart-wallet ownership is added later, use ERC-1271/6492 verification standards.
+- Identified existing platform/industry technology to reuse rather than rebuild: Android HCE/APDUs for mobile NFC presentation and Aliro as a post-hackathon commercial interoperability direction.
+- Clarified that the ESP32 is the programmable door/access controller and the PN532 is the NFC radio/reader. NFC utility apps are debugging/tag tools, not replacements for an autonomous verifier that generates challenges, checks authorization, and actuates hardware.
+- Clarified that the current PC bridge accelerates development/debugging but is not a permanent product requirement.
+- No commercial price for a credential was selected. Any testnet USDC amount used in the demo is a payment-flow parameter, not a production pricing claim.
+- Submission deadline reconfirmed from ETHGlobal email: Sunday, September 13 at 12:00 ET / 18:00 CEST. Demo-video work must begin before the final hours.
+
