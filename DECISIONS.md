@@ -303,3 +303,46 @@ Any testnet USDC amount exists to demonstrate a real financial flow, not to esta
 ### Revisit when
 
 Post-hackathon product economics are researched with real deployment costs and customers.
+
+---
+
+## D-012 — Holder-proof v1 uses server-issued, one-shot EIP-712 challenges
+
+**Status:** Accepted
+**Date:** 2026-09-09
+
+### Decision
+
+Use the `ENSv2 Access` version `1` EIP-712 domain on Sepolia (`chainId` 11155111) with this challenge:
+
+```text
+AccessChallenge(
+  bytes32 credential,
+  bytes32 resource,
+  bytes32 nonce,
+  uint64 expiresAt
+)
+```
+
+`credential` is the canonical ENS namehash. `resource` binds the proof to one application-defined door/resource. The verifier generates an unpredictable nonce, applies a short expiry, and accepts only challenges present in its issued-challenge store.
+
+At verification time, recover the signer from canonical server-stored typed data and require it to equal the current ENSv2 credential owner. After a valid current-holder proof, consume the challenge exactly once before evaluating the existing ENS access policy. The challenge remains consumed even when that policy returns DENY.
+
+For the current hackathon Node verifier, an in-memory `PENDING` / `CONSUMED` store is sufficient.
+
+### Why
+
+Server issuance prevents holders from inventing challenges. Credential, resource, expiry, and one-shot nonce binding prevent cross-credential, cross-door, stale, and replayed proofs. Consuming before the policy result prevents a captured proof denied under inactive access from becoming valid after access is activated.
+
+Authentication and authorization remain separate: EIP-712 proves wallet control, while current ENSv2 ownership and the existing `access.v1` policy remain the source of truth.
+
+### Consequences
+
+- Static NFC UID must not be an authorization factor in the future secure path.
+- Ownership transfer invalidates signatures from the former owner.
+- Persisted/distributed challenge storage is deferred until the verifier requires multiple processes or restart survival.
+- Android, Privy signing, HCE, and APDU transport are not implemented by this decision or by Gate A.
+
+### Revisit when
+
+The verifier requires durable or distributed replay protection, or a later wallet type requires standard contract-wallet verification.

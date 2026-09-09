@@ -74,3 +74,14 @@ No product code has been written yet.
 - No commercial price for a credential was selected. Any testnet USDC amount used in the demo is a payment-flow parameter, not a production pricing claim.
 - Submission deadline reconfirmed from ETHGlobal email: Sunday, September 13 at 12:00 ET / 18:00 CEST. Demo-video work must begin before the final hours.
 
+### Secure holder-proof Gate A milestone
+
+- Clarified the canonical baseline: the full command `node --test --test-isolation=none` discovers 62 existing tests; the earlier 39 count covered only `scripts/ensv2/access-record.test.mjs`.
+- Implemented a server-issued `ENSv2 Access` EIP-712 challenge with credential namehash, resource binding, verifier-generated random nonce, short expiry, and an in-memory `PENDING` / `CONSUMED` store.
+- Verification reconstructs typed data from the stored challenge, recovers the signer, and compares it with the current ENSv2 credential owner at verification time.
+- A valid current-holder proof is consumed exactly once before the existing `isAuthorized` ENS policy runs, including when that later policy returns DENY.
+- Confirmed that a valid proof presented while access is inactive remains consumed: changing mocked access to active still returns `REPLAYED_CHALLENGE`, never ALLOW.
+- Added 17 deterministic holder-proof tests; the complete suite now passes 79 tests.
+- Added no dependency, accessed no real private key, and performed no blockchain write.
+- Technical learning: authentication proof and authorization policy are separate. EIP-712 proves control of a wallet, while current ENSv2 ownership and `access.v1` remain authoritative for authorization.
+

@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Timebox the secure holder-proof vertical slice: mobile/Privy embedded EOA signer -> fresh EIP-712 challenge -> NFC/mobile transport -> verifier -> authoritative ENSv2 authorization.
+Gate B: prove a native Privy Android embedded EOA can sign the exact `ENSv2 Access` EIP-712 challenge and Node/viem recovers the same wallet address.
 
 Do not add Privy payment, World, ERC-4337, or another sponsor layer until this security boundary is either validated or explicitly stopped by the timebox.
 
@@ -29,6 +29,8 @@ Do not add Privy payment, World, ERC-4337, or another sponsor layer until this s
 - Semantic no-op protection, client in-flight locking, pending-nonce checks, pre-submit RPC retries, and post-submit hash recovery prevent duplicate access writes across failure boundaries.
 - Final dedicated-RPC validation reproduced NFC `DENY -> ALLOW -> DENY`, preserved credential identity, required no manual browser refresh, and ended with no pending DEV transaction.
 - A dedicated Sepolia RPC configured through the existing local environment improved demo reliability; no endpoint or key is stored in the repository.
+- Secure holder-proof Gate A: PASS. Node now issues server-owned EIP-712 challenges, verifies the recovered signer against the current ENSv2 credential owner, consumes a valid holder proof exactly once before evaluating the shared `isAuthorized` policy, and rejects replay even when access later changes from DENY to ALLOW.
+- Gate A validation passed 17 holder-proof tests and the complete 79-test repository suite.
 
 ## Sponsor / architecture delta
 
@@ -49,14 +51,16 @@ Do not add Privy payment, World, ERC-4337, or another sponsor layer until this s
 
 ## Next
 
-1. Execute the secure mobile/NFC challenge-response spike with a strict stop-loss.
-2. If PASS, integrate the proof with the existing ENSv2 authorization path.
-3. If the spike exceeds the stop-loss, preserve the current verified ENSv2 + physical demo, document the UID security boundary clearly, and shift to deployment/demo/submission hardening.
-4. Only after the core is stable, evaluate Privy payment/onboarding and World Selfie Check as secondary sponsor layers.
+1. Install the minimum native Android toolchain; it is currently missing from this machine.
+2. Execute Gate B with a strict stop-loss: authenticate through native Privy Android, create/use an embedded EVM EOA, sign the exact Gate A typed challenge, and recover the same address with Node/viem.
+3. Treat native Privy Android typed-data signing as empirically unverified until Gate B passes; do not infer it from the generic provider interface.
+4. Do not begin Android HCE/NFC transport until Gate B passes.
 
 ## Blockers
 
 - Secure wallet/mobile proof of credential control over the physical NFC path is not yet validated.
+- The Android toolchain is not installed on this machine.
+- Native Privy Android support for the required EIP-712 typed-data request remains empirically unverified.
 - World Selfie Check sandbox/access is an external dependency only if World is selected as a secondary sponsor.
 
 ## Risks
@@ -88,4 +92,14 @@ The credential remained REGISTERED with unchanged owner, tokenId, resolver, and 
 
 This proves programmable physical authorization backed by real ENSv2 state.
 
-It does not yet prove secure possession/control of the credential over NFC.
+Gate A additionally proves the transport-independent holder model:
+
+```text
+server-issued EIP-712 challenge
+  -> current-owner signature verification
+  -> one-shot consumption
+  -> existing ENSv2 access policy
+  -> ALLOW / DENY
+```
+
+The full suite passes 79 tests. Android/Privy signing and NFC transport are not yet implemented, so secure possession/control over the physical path remains unproven.
