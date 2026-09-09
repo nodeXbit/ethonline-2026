@@ -7,5 +7,8 @@
 - Core flow: an operator creates or updates access state through ENSv2 on Sepolia; a user presents an NFC identifier; the prototype resolves the associated credential state and produces an access decision.
 - Primary sponsor: ENS / ENSv2.
 - MVP: one end-to-end Sepolia vertical slice demonstrating ENSv2-authoritative credential state and a physical ISO14443A NFC interaction through the ESP32-S3 and PN532.
+- Verified architecture: UserRegistry provides persistent credential ownership; PermissionedResolver `access.v1` provides independent physical-access state. Access can be activated or revoked without unregistering or burning the credential.
+- Verified lifecycle: the same NFC tag produced `DENY → ALLOW → DENY` while the credential remained REGISTERED with unchanged owner, tokenId, resolver, and registry expiry.
+- Future layers: presentation/collectible behavior, dynamic metadata, loyalty, transferability, and programmable benefits may build on the persistent credential, but none is implemented yet.
 - Non-goals: production-grade access control, complex infrastructure, multiple superficial sponsor integrations, cryptographic NFC challenge-response, Android HCE, and unrelated Hermes/Knowledge OS work.
 - NFC security boundary: a static NFC UID is acceptable only as a prototype/demo identifier. It is clonable and must not be represented as secure proof of credential ownership or as anti-cloning security.

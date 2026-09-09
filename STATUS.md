@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Design and validate the smallest persistent-credential access lifecycle where the ENSv2 credential can survive after physical access expires, instead of using unregister/burn as the final product model.
+Build the smallest interactive visual demo for the verified persistent credential lifecycle, showing the credential as a dynamic digital key whose presentation changes with ENSv2 access state.
 
 ## Done
 
@@ -21,10 +21,13 @@ Design and validate the smallest persistent-credential access lifecycle where th
 - Local ESP32-S3 serial test and PN532 NFC tag-reading firmware completed.
 - First ENSv2 Sepolia vertical slice: DONE. `demo-access.eth` is attached to UserRegistry `0x2d249472B83A453086254Acd8a42913D8e45a2Fd`; register/read/unregister lifecycle passed with ENSv2 authoritative for authorization state.
 - Physical NFC → ENSv2 authorization vertical slice: PASS. The same physical tag (`91:2D:E3:06`) produced `DENY → ALLOW → DENY` solely from ENSv2 credential state for `cred-001.demo-access.eth`.
+- Persistent physical credential slice: PASS. UserRegistry ownership kept `cred-001.demo-access.eth` REGISTERED while PermissionedResolver `access.v1` independently changed physical authorization from inactive to active to inactive.
+- Persistent identity invariants were preserved throughout validation: owner, tokenId, resolver, and registry expiry did not change.
+- The physical NFC UID remains a clonable prototype/demo identifier, not production proof of possession or anti-cloning security.
 
 ## Next
 
-1. Design and validate the smallest persistent-credential access lifecycle where the ENSv2 credential can survive after physical access expires, instead of using unregister/burn as the final product model.
+1. Build the smallest interactive visual demo for the verified persistent credential lifecycle, showing the credential as a dynamic digital key whose presentation changes with ENSv2 access state.
 
 ## Blockers
 

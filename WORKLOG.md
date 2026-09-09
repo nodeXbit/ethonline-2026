@@ -34,3 +34,15 @@ No product code has been written yet.
 - The logical ENS label remained `cred-001.demo-access.eth`, while the current tokenId changed after unregister (`...167041` → `...167042`); tokenId must therefore be rediscovered and is not a permanent application identifier.
 - The static NFC UID is only a clonable prototype/demo identifier, not proof of possession or production security.
 - Conclusion: ENSv2 is verified as load-bearing authorization state in the physical demo. The next product question is a persistent credential lifecycle that can survive after physical access expires rather than treating unregister/burn as the final model.
+
+### Persistent physical credential milestone
+
+- Chose a two-layer ENSv2 model: UserRegistry provides persistent ownership of `cred-001.demo-access.eth`, while PermissionedResolver `access.v1` independently controls whether the physical credential authorizes entry.
+- Reused the verified PermissionedResolver at `0x0B723c0C2170F2ea508F2f4e3e122C6c0782744C` with UserRegistry `0x2d249472B83A453086254Acd8a42913D8e45a2Fd` under `demo-access.eth`.
+- Initialized inactive access with `0xfdee98ad2bb5d646ae1a5ce940a858970759b2cb6bab0615cae57b89c00a4f69`, then registered the persistent credential with `0x60f6125afe15d6383728cbc4cf019926afe8e62927d41fb91e1fef54543d029a`.
+- Activated access with `0xe2385b730a8ee48c7d9fbc7ecf862d5022ea8883997a56375f1d05738a066335` in block `11664354`, and deactivated it with `0x0e3ab168faa2fffe67bb0d0cda2222726fb58f8890bd90c1f82108bd0fce712b` in block `11664363`.
+- Presented the same physical NFC tag (`91:2D:E3:06`) for the complete lifecycle and observed `DENY → ALLOW → DENY`, driven by `access.active: false → true → false`.
+- Preserved REGISTERED status, owner `0x4C60a5AD311510543B56d0408872A52e4AEEe19C`, tokenId `111633085976721986886445685281703791217854403259346662013299173065803998167042`, resolver, and registry expiry `1820447664` throughout.
+- Confirmed that rerunning persistent setup while ACTIVE was idempotent: it sent no transaction, did not re-register the credential, and did not reset access.
+- Recovery/debugging lesson: reconstruct public nonces, receipts, resolver provenance, roles, and pinned-block state before retrying. Safe errors must retain stage, operation, custom error/RPC code, and any public transaction hash without exposing RPC credentials.
+- Conclusion: ENSv2 is load-bearing for physical authorization, while the credential survives access revocation. Ownership lifetime and access lifetime are now separate.
