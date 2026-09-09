@@ -4,6 +4,7 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
+    "demo": "node --env-file=.env.local demo/server.mjs",
     "ensv2:setup": "node --env-file=.env.local scripts/ensv2/setup.mjs",
     "ensv2:lifecycle": "node --env-file=.env.local scripts/ensv2/lifecycle.mjs",
     "nfc:bridge": "node --env-file=.env.nfc.local scripts/nfc/bridge.mjs",

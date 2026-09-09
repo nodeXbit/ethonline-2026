@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Local ENSv2 persistent access credential demo">
+  <title>ENSv2 Digital Key</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main class="demo-shell">
+    <header class="intro">
+      <p class="eyebrow">ENSv2 · Sepolia</p>
+      <h1>Persistent credential.<br><span>Changeable access.</span></h1>
+      <p class="intro-copy">The identity stays registered while its physical access permission changes onchain.</p>
+    </header>
+
+    <section class="key-card is-loading" id="key-card" aria-labelledby="credential-name">
+      <div class="card-glow" aria-hidden="true"></div>
+      <div class="card-topline">
+        <div>
+          <p class="micro-label">DEMO ACCESS</p>
+          <p class="card-type">DIGITAL KEY</p>
+        </div>
+        <span class="network-pill">SEPOLIA</span>
+      </div>
+
+      <div class="key-visual" aria-hidden="true">
+        <span class="key-ring"></span>
+        <span class="key-stem"></span>
+        <span class="key-tooth key-tooth-one"></span>
+        <span class="key-tooth key-tooth-two"></span>
+      </div>
+
+      <div class="state-line">
+        <div>
+          <p class="micro-label">ACCESS STATE</p>
+          <p class="access-state" id="access-state">LOADING</p>
+        </div>
+        <div class="authorization">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="authorization">CHECKING</span>
+        </div>
+      </div>
+
+      <div class="identity">
+        <p class="micro-label">CREDENTIAL</p>
+        <h2 id="credential-name">cred-001.demo-access.eth</h2>
+        <div class="persistence-message">
+          <span>Credential</span><strong id="credential-status">—</strong>
+          <span class="divider" aria-hidden="true"></span>
+          <span>Access</span><strong id="access-summary">—</strong>
+        </div>
+      </div>
+
+      <dl class="details">
+        <div class="detail detail-wide">
+          <dt>Holder</dt>
+          <dd id="holder">—</dd>
+        </div>
+        <div class="detail detail-wide">
+          <dt>Access valid until</dt>
+          <dd id="valid-until">—</dd>
+        </div>
+        <div class="detail">
+          <dt>Token ID</dt>
+          <dd id="token-id">—</dd>
+        </div>
+        <div class="detail">
+          <dt>Resolver</dt>
+          <dd id="resolver">—</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="controls" aria-label="Credential controls">
+      <button id="action-button" type="button" disabled>Loading credential…</button>
+      <p class="feedback" id="feedback" role="status" aria-live="polite">Reading authoritative ENSv2 state…</p>
+    </section>
+
+    <footer>
+      <span class="live-mark"><span></span> Live ENSv2 reads</span>
+      <span>No wallet in this browser</span>
+    </footer>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

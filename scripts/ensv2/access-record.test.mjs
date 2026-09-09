@@ -8,6 +8,7 @@ import {
 } from './access-record.mjs';
 import {
   nextAccess, publicErrorDetails, requireSameCredential, registrationExpiry, setupCredential,
+  updateAccess,
 } from './persistent-access.mjs';
 import { normalizeUid, parseDetectionLine } from '../nfc/bridge.mjs';
 
@@ -171,7 +172,7 @@ function chain(options = {}) {
           data: encodeAbiParameters([{ type: 'uint256' }, { type: 'address' }],
             [predictResolver(owner, logic).salt, PermissionedResolverImpl]) });
       } else if (request.functionName === 'setData') {
-        state.access = request.args[2];
+        if (!state.ignoreAccessWrite) state.access = request.args[2];
       } else if (request.functionName === 'register') {
         assert.equal(decodeAccess(state.access)?.active, false, 'Must initialize inactive BEFORE registration');
         assert.ok(decodeAccess(state.access).validUntil > state.timestamp);
@@ -190,6 +191,32 @@ function chain(options = {}) {
 const registered = { status: REGISTERED, deployed: true, expiry: 1000000n };
 const inactive = encodeAccess({ active: false, validUntil: 90000n });
 const active = encodeAccess({ active: true, validUntil: 90000n });
+
+test('shared updateAccess confirms INACTIVE -> ACTIVE -> INACTIVE with persistent identity', async () => {
+  const c = chain({ ...registered, access: inactive });
+  const before = await readCredential(c.client, { includeParent: true });
+  const activated = await updateAccess(c.context, 'activate');
+  assert.equal(activated.credential.authorized, true);
+  assert.equal(activated.credential.access.active, true);
+  assert.match(activated.transactionHash, /^0x[0-9a-f]{64}$/);
+  requireSameCredential(before, activated.credential);
+
+  const deactivated = await updateAccess(c.context, 'deactivate');
+  assert.equal(deactivated.credential.authorized, false);
+  assert.equal(deactivated.credential.access.active, false);
+  requireSameCredential(activated.credential, deactivated.credential);
+  assert.deepEqual(c.writes, ['setData', 'setData']);
+});
+
+test('updateAccess cannot report success without requested confirmed readback', async () => {
+  const stale = chain({ ...registered, access: inactive, ignoreAccessWrite: true });
+  await assert.rejects(updateAccess(stale.context, 'activate'), /readback mismatch/);
+  assert.deepEqual(stale.writes, ['setData']);
+
+  const failed = chain({ ...registered, access: inactive, noControl: true });
+  await assert.rejects(updateAccess(failed.context, 'activate'));
+  assert.deepEqual(failed.writes, []);
+});
 
 test('fresh setup deploys, initializes inactive, then registers', async () => {
   const c = chain();

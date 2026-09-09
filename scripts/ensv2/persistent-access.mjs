@@ -233,6 +233,29 @@ export async function setupCredential(context) {
   }
 }
 
+export async function updateAccess(context, action) {
+  requireCondition(action === 'activate' || action === 'deactivate',
+    'Access action must be activate or deactivate.');
+  stage = 'access update preflight';
+  const before = await readCredential(context.publicClient, { includeParent: true });
+  requireRegistered(before);
+  requireCondition(!isAddressEqual(before.resolver, zeroAddress), 'Credential has no resolver.');
+  const access = nextAccess(action, before.access, before.block.timestamp);
+  stage = 'simulated access update and receipt';
+  const transaction = await send(context, dataCall(before.resolver, access));
+  stage = 'access and persistent identity readback';
+  const after = await readCredential(context.publicClient, { includeParent: true });
+  requireCondition(after.block.number >= transaction.receipt.blockNumber,
+    'Readback predates update.');
+  requireSameCredential(before, after);
+  requireCondition(sameAccess(after.access, access), 'Access readback mismatch.');
+  return {
+    transactionHash: transaction.receipt.transactionHash,
+    blockNumber: transaction.receipt.blockNumber,
+    credential: after,
+  };
+}
+
 export async function main(action = process.argv[2]) {
   requireCondition(['setup', 'activate', 'deactivate', 'inspect'].includes(action),
     'Command must be setup, activate, deactivate or inspect.');
@@ -255,20 +278,9 @@ export async function main(action = process.argv[2]) {
     return;
   }
 
-  stage = 'access update preflight';
-  const before = await readCredential(context.publicClient, { includeParent: true });
-  requireRegistered(before);
-  requireCondition(!isAddressEqual(before.resolver, zeroAddress), 'Credential has no resolver.');
-  const access = nextAccess(action, before.access, before.block.timestamp);
-  stage = 'simulated access update and receipt';
-  const transaction = await send(context, dataCall(before.resolver, access));
-  stage = 'access and persistent identity readback';
-  const after = await readCredential(context.publicClient, { includeParent: true });
-  requireCondition(after.block.number >= transaction.receipt.blockNumber, 'Readback predates update.');
-  requireSameCredential(before, after);
-  requireCondition(sameAccess(after.access, access), 'Access readback mismatch.');
-  printSnapshot(after);
-  console.log(`ACCESS STATE: ${access.active ? 'ACTIVE' : 'INACTIVE'}`);
+  const result = await updateAccess(context, action);
+  printSnapshot(result.credential);
+  console.log(`ACCESS STATE: ${result.credential.access.active ? 'ACTIVE' : 'INACTIVE'}`);
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
