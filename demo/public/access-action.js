@@ -1,6 +1,32 @@
 const defaultRecoveryDelays = [500, 1000, 2000, 3000, 5000, 5000, 5000, 5000];
 const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 
+const transactionHashPattern = /^0x[0-9a-fA-F]{64}$/;
+
+export class ApiRequestError extends Error {
+  constructor(error, status) {
+    const message = error?.message || `Request failed (${status}).`;
+    super(error?.stage ? `${message} Stage: ${error.stage}.` : message);
+    this.name = 'ApiRequestError';
+    this.code = error?.code;
+    this.stage = error?.stage;
+    this.retryable = error?.retryable === true;
+    this.noTransactionSent = error?.noTransactionSent === true;
+    this.transactionHash = transactionHashPattern.test(error?.transactionHash ?? '')
+      ? error.transactionHash : null;
+    this.transactionState = error?.transactionState;
+  }
+}
+
+export function createJsonRequester(fetchImpl = globalThis.fetch) {
+  return async function requestJson(path, options) {
+    const response = await fetchImpl(path, { ...options, headers: { Accept: 'application/json' } });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) throw new ApiRequestError(body.error, response.status);
+    return body;
+  };
+}
+
 export function sameCredentialIdentity(before, after) {
   return before.name === after.name && before.status === after.status &&
     before.owner.toLowerCase() === after.owner.toLowerCase() &&
@@ -88,6 +114,12 @@ export function createAccessActionHandler({
         setFeedback(`${confirmedMessage} Refresh/reconciliation failed; showing confirmed state.`, 'warning');
       }
     } catch (error) {
+      if (transactionHashPattern.test(error?.transactionHash ?? '')) {
+        keepLocked = true;
+        setFeedback(`A Sepolia transaction was submitted and requires read-only recovery. Do not click again. Reload to reconcile. ${shorten(error.transactionHash)}`,
+          'warning');
+        return;
+      }
       setFeedback(error instanceof Error ? error.message : 'The update failed. You can retry.', 'error');
     } finally {
       if (!keepLocked) {

@@ -7,7 +7,7 @@ import { readCredential, credentialLabel, parentName } from '../scripts/ensv2/ac
 import { connect, requireCondition } from '../scripts/ensv2/contracts.mjs';
 import {
   accessStateAchieved, PendingAccessTransaction, publicErrorDetails,
-  RevertedAccessTransaction, updateAccess,
+  PreSubmissionRpcError, retryPreSubmissionRpc, RevertedAccessTransaction, updateAccess,
 } from '../scripts/ensv2/persistent-access.mjs';
 
 export const demoHost = '127.0.0.1';
@@ -58,6 +58,9 @@ export function safePublicError(error, {
   if (/^0x[0-9a-fA-F]{64}$/.test(details.transactionHash ?? '')) {
     result.transactionHash = details.transactionHash;
   }
+  if (error?.retryable === true) result.retryable = true;
+  if (error?.noTransactionSent === true) result.noTransactionSent = true;
+  if (error?.transactionState) result.transactionState = error.transactionState;
   return result;
 }
 
@@ -94,7 +97,9 @@ function validateWriteRequest(request) {
   return null;
 }
 
-export function createDemoHandler({ readState, writeAccess, loadStatic = readFile }) {
+export function createDemoHandler({
+  readState, writeAccess, loadStatic = readFile, preSubmissionRetryOptions = {},
+}) {
   let writePending = false;
   let unresolvedWrite = null;
 
@@ -176,7 +181,9 @@ export function createDemoHandler({ readState, writeAccess, loadStatic = readFil
       writePending = true;
       const action = path === '/api/activate' ? 'activate' : 'deactivate';
       try {
-        const before = await readState();
+        const before = await retryPreSubmissionRpc(readState, {
+          ...preSubmissionRetryOptions, stage: 'credential read before access update',
+        });
         const result = accessStateAchieved(before, action)
           ? { changed: false, transactionHash: null, credential: before }
           : await writeAccess(action);
@@ -204,13 +211,17 @@ export function createDemoHandler({ readState, writeAccess, loadStatic = readFil
       } catch (error) {
         const pendingTransaction = error instanceof PendingAccessTransaction;
         const revertedTransaction = error instanceof RevertedAccessTransaction;
+        const preSubmissionRpcFailure = error instanceof PreSubmissionRpcError;
         const conflict = pendingTransaction ||
           /Credential must be REGISTERED|access\.v1 is not configured/.test(String(error?.message ?? ''));
-        sendJson(response, conflict ? 409 : 500, { error: safePublicError(error, {
+        sendJson(response, conflict ? 409 : preSubmissionRpcFailure ? 503 : 500,
+          { error: safePublicError(error, {
           code: pendingTransaction ? 'PREVIOUS_TRANSACTION_PENDING'
             : revertedTransaction ? 'TRANSACTION_REVERTED'
-              : conflict ? 'INCOMPATIBLE_STATE' : 'WRITE_FAILED',
-          stage: revertedTransaction ? 'Sepolia transaction receipt' : 'Sepolia access update',
+              : preSubmissionRpcFailure ? 'PRE_SUBMISSION_RPC_FAILED'
+                : conflict ? 'INCOMPATIBLE_STATE' : 'WRITE_FAILED',
+          stage: preSubmissionRpcFailure ? error.stage
+            : revertedTransaction ? 'Sepolia transaction receipt' : 'Sepolia access update',
         }) });
       } finally {
         writePending = false;
@@ -227,17 +238,18 @@ export function createProductionDependencies() {
   let publicClient;
   async function client() {
     if (!publicClient) {
-      publicClient = createPublicClient({ chain: sepolia,
+      const candidate = createPublicClient({ chain: sepolia,
         transport: http(process.env.SEPOLIA_RPC_URL?.trim() || undefined) });
-      requireCondition(await publicClient.getChainId() === sepolia.id,
+      requireCondition(await candidate.getChainId() === sepolia.id,
         'RPC must be Sepolia (11155111).');
+      publicClient = candidate;
     }
     return publicClient;
   }
   return {
     readState: async () => readCredential(await client()),
     writeAccess: async action => {
-      const context = await connect();
+      const context = await retryPreSubmissionRpc(connect, { stage: 'Sepolia connection' });
       requireCondition(context.parent === parentName, 'This demo requires demo-access.eth.');
       return updateAccess(context, action);
     },

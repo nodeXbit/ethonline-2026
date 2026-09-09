@@ -81,6 +81,51 @@ export class RevertedAccessTransaction extends Error {
   }
 }
 
+const transientRpcErrorNames = new Set([
+  'HttpRequestError', 'RpcRequestError', 'TimeoutError', 'WebSocketRequestError',
+]);
+
+export function isTransientRpcError(error) {
+  const chain = [];
+  for (let current = error; current && chain.length < 12; current = current.cause) chain.push(current);
+  if (chain.some(item => item?.data?.errorName || /Revert|Abi|Invalid/.test(item?.name ?? ''))) {
+    return false;
+  }
+  for (const current of chain) {
+    if (transientRpcErrorNames.has(current.name)) return true;
+    if ([429, 502, 503, 504, -32005].includes(current.code)) return true;
+  }
+  return false;
+}
+
+export class PreSubmissionRpcError extends Error {
+  constructor(failureStage) {
+    super('Sepolia RPC temporarily unavailable before transaction submission. No transaction was sent. Retry is safe.');
+    this.name = 'PreSubmissionRpcError';
+    this.stage = failureStage;
+    this.retryable = true;
+    this.noTransactionSent = true;
+    this.transactionState = accessTransactionState.beforeSubmission;
+  }
+}
+
+const defaultPreSubmissionRetryDelays = [0, 150, 400];
+
+export async function retryPreSubmissionRpc(operation, {
+  stage: failureStage, retryDelays = defaultPreSubmissionRetryDelays, sleep = delay,
+} = {}) {
+  for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+    if (retryDelays[attempt] > 0) await sleep(retryDelays[attempt]);
+    try {
+      return await operation();
+    } catch (error) {
+      if (!isTransientRpcError(error)) throw error;
+      if (attempt === retryDelays.length - 1) throw new PreSubmissionRpcError(failureStage);
+    }
+  }
+  throw new PreSubmissionRpcError(failureStage);
+}
+
 export async function requireNoPending(client, address) {
   const [latest, pending] = await Promise.all([
     client.getTransactionCount({ address, blockTag: 'latest' }),
@@ -118,11 +163,13 @@ async function setupSend(context, contract, predictedResolver) {
   }
 }
 
-async function requireNoPendingAccess(client, address) {
-  const [latest, pending] = await Promise.all([
-    client.getTransactionCount({ address, blockTag: 'latest' }),
-    client.getTransactionCount({ address, blockTag: 'pending' }),
-  ]);
+async function requireNoPendingAccess(client, address, retryOptions, guardStage) {
+  const latest = await retryPreSubmissionRpc(
+    () => client.getTransactionCount({ address, blockTag: 'latest' }),
+    { ...retryOptions, stage: `${guardStage} latest nonce read` });
+  const pending = await retryPreSubmissionRpc(
+    () => client.getTransactionCount({ address, blockTag: 'pending' }),
+    { ...retryOptions, stage: `${guardStage} pending nonce read` });
   if (pending > latest) throw new PendingAccessTransaction();
   requireCondition(pending === latest, 'Unexpected DEV transaction count state.');
 }
@@ -332,7 +379,10 @@ export async function updateAccess(context, action, recoveryOptions = {}) {
   requireCondition(action === 'activate' || action === 'deactivate',
     'Access action must be activate or deactivate.');
   stage = 'access update preflight';
-  const before = await readCredential(context.publicClient, { includeParent: true });
+  const preSubmissionRetryOptions = recoveryOptions.preSubmissionRetryOptions ?? {};
+  const before = await retryPreSubmissionRpc(
+    () => readCredential(context.publicClient, { includeParent: true }),
+    { ...preSubmissionRetryOptions, stage: 'access update credential read' });
   if (accessStateAchieved(before, action)) {
     return {
       changed: false,
@@ -346,12 +396,15 @@ export async function updateAccess(context, action, recoveryOptions = {}) {
   }
   const access = nextAccess(action, before.access, before.block.timestamp);
   stage = 'access update pending nonce guard';
-  await requireNoPendingAccess(context.publicClient, context.account.address);
+  await requireNoPendingAccess(context.publicClient, context.account.address,
+    preSubmissionRetryOptions, 'initial');
   stage = 'simulated access update';
-  const { request } = await context.publicClient.simulateContract({
-    ...dataCall(before.resolver, access), account: context.account,
-  });
-  await requireNoPendingAccess(context.publicClient, context.account.address);
+  const { request } = await retryPreSubmissionRpc(
+    () => context.publicClient.simulateContract({
+      ...dataCall(before.resolver, access), account: context.account,
+    }), { ...preSubmissionRetryOptions, stage: 'access update simulation' });
+  await requireNoPendingAccess(context.publicClient, context.account.address,
+    preSubmissionRetryOptions, 'post-simulation');
   stage = 'access update submission';
   const transactionHash = await context.walletClient.writeContract(request);
   console.log({ operation: 'setData', transactionHash });

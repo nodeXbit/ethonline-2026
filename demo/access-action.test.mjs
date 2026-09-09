@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { createAccessActionHandler } from './public/access-action.js';
+import { createAccessActionHandler, createJsonRequester } from './public/access-action.js';
 
 const inactive = {
   status: 'REGISTERED', owner: '0x1111111111111111111111111111111111111111',
@@ -10,6 +10,70 @@ const inactive = {
 };
 const active = { ...inactive, access: { active: true, validUntil: '1800000000' },
   authorization: 'ALLOW' };
+
+test('structured non-2xx API error is rendered with its safe stage and card preserved', async () => {
+  const feedback = [];
+  const pending = [];
+  let renders = 0;
+  const requestJson = createJsonRequester(async () => ({
+    ok: false,
+    status: 503,
+    json: async () => ({ error: {
+      code: 'PRE_SUBMISSION_RPC_FAILED',
+      message: 'Sepolia RPC temporarily unavailable before transaction submission. No transaction was sent. Retry is safe.',
+      stage: 'Sepolia connection', retryable: true, noTransactionSent: true,
+    } }),
+  }));
+  const changeAccess = createAccessActionHandler({
+    getCredential: () => inactive,
+    isCredentialUsable: () => true,
+    requestJson,
+    render: () => { renders++; },
+    setPending: (action, value) => pending.push([action, value]),
+    setFeedback: (message, tone) => feedback.push({ message, tone }),
+    shorten: value => value,
+  });
+
+  await changeAccess();
+  assert.equal(renders, 0);
+  assert.deepEqual(pending, [['activate', true], ['activate', false]]);
+  assert.equal(feedback.at(-1).tone, 'error');
+  assert.match(feedback.at(-1).message, /No transaction was sent\. Retry is safe/);
+  assert.match(feedback.at(-1).message, /Stage: Sepolia connection/);
+  assert.doesNotMatch(feedback.at(-1).message, /^HTTP request failed\.$/);
+});
+
+test('non-2xx error containing a submitted hash remains locked and never repeats POST', async () => {
+  const hash = `0x${'34'.repeat(32)}`;
+  let posts = 0;
+  const feedback = [];
+  const pending = [];
+  const requestJson = createJsonRequester(async () => {
+    posts++;
+    return {
+      ok: false, status: 500,
+      json: async () => ({ error: { message: 'Submitted transaction needs inspection.',
+        stage: 'Sepolia transaction receipt', transactionHash: hash } }),
+    };
+  });
+  const changeAccess = createAccessActionHandler({
+    getCredential: () => inactive,
+    isCredentialUsable: () => true,
+    requestJson,
+    render: () => assert.fail('confirmed card must be preserved'),
+    setPending: (action, value) => pending.push([action, value]),
+    setFeedback: (message, tone) => feedback.push({ message, tone }),
+    shorten: value => value,
+  });
+
+  await changeAccess();
+  await changeAccess();
+  assert.equal(posts, 1);
+  assert.deepEqual(pending, [['activate', true]]);
+  assert.equal(feedback.at(-1).tone, 'warning');
+  assert.match(feedback.at(-1).message, /Do not click again/);
+  assert.match(feedback.at(-1).message, new RegExp(hash));
+});
 
 test('double invocation starts one POST and a failed reconciliation preserves POST state', async () => {
   let credential = inactive;

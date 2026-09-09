@@ -5,7 +5,8 @@ import {
   createDemoHandler, demoAuthority, demoOrigin, publicCredential, safePublicError,
 } from './server.mjs';
 import {
-  accessTransactionState, PendingAccessTransaction, RevertedAccessTransaction,
+  accessTransactionState, PendingAccessTransaction, PreSubmissionRpcError,
+  RevertedAccessTransaction,
 } from '../scripts/ensv2/persistent-access.mjs';
 
 const owner = '0x1111111111111111111111111111111111111111';
@@ -63,6 +64,9 @@ function request(port, path, { method = 'GET', headers = {}, body } = {}) {
 }
 
 const validWriteHeaders = { Host: demoAuthority, Origin: demoOrigin };
+const transientRpcError = () => Object.assign(new Error('HTTP request failed.'), {
+  name: 'HttpRequestError',
+});
 
 test('public credential serialization keeps chain integers as strings and excludes secrets', () => {
   const result = publicCredential(snapshot());
@@ -103,6 +107,84 @@ test('writes require exact local Host and Origin and reject request bodies', asy
       method: 'POST', headers: { ...validWriteHeaders, 'Transfer-Encoding': 'chunked' }, body: 'x',
     })).status, 400);
   });
+});
+
+test('exact browser POST Host, Origin and empty body are accepted', async () => {
+  await withServer(async port => {
+    const response = await request(port, '/api/activate', {
+      method: 'POST', headers: validWriteHeaders,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(JSON.parse(response.text).changed, true);
+  });
+});
+
+test('transient credential read retries before submission and then succeeds', async () => {
+  let reads = 0;
+  let writes = 0;
+  await withServer(async port => {
+    const response = await request(port, '/api/activate', {
+      method: 'POST', headers: validWriteHeaders,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(reads, 2);
+    assert.equal(writes, 1);
+  }, state => ({
+    preSubmissionRetryOptions: { retryDelays: [0, 0], sleep: async () => {} },
+    readState: async () => {
+      reads++;
+      if (reads === 1) throw transientRpcError();
+      return state;
+    },
+    writeAccess: async () => {
+      writes++;
+      return { changed: true, transactionHash, credential: state };
+    },
+  }));
+});
+
+test('exhausted pre-submission read returns safe retryable HTTP 503 with zero writes', async () => {
+  let writes = 0;
+  await withServer(async port => {
+    const response = await request(port, '/api/activate', {
+      method: 'POST', headers: validWriteHeaders,
+    });
+    const body = JSON.parse(response.text);
+    assert.equal(response.status, 503);
+    assert.deepEqual(body.error, {
+      code: 'PRE_SUBMISSION_RPC_FAILED',
+      message: 'Sepolia RPC temporarily unavailable before transaction submission. No transaction was sent. Retry is safe.',
+      stage: 'credential read before access update',
+      retryable: true,
+      noTransactionSent: true,
+      transactionState: accessTransactionState.beforeSubmission,
+    });
+    assert.equal(writes, 0);
+  }, {
+    preSubmissionRetryOptions: { retryDelays: [0, 0], sleep: async () => {} },
+    readState: async () => { throw transientRpcError(); },
+    writeAccess: async () => { writes++; },
+  });
+});
+
+test('exhausted internal pre-submission stages retain their precise public stage', async () => {
+  for (const stage of [
+    'Sepolia connection', 'access update credential read', 'initial latest nonce read',
+    'initial pending nonce read', 'access update simulation',
+    'post-simulation latest nonce read', 'post-simulation pending nonce read',
+  ]) {
+    await withServer(async port => {
+      const response = await request(port, '/api/activate', {
+        method: 'POST', headers: validWriteHeaders,
+      });
+      const body = JSON.parse(response.text);
+      assert.equal(response.status, 503);
+      assert.equal(body.error.code, 'PRE_SUBMISSION_RPC_FAILED');
+      assert.equal(body.error.stage, stage);
+      assert.equal(body.error.noTransactionSent, true);
+      assert.equal(body.error.transactionHash, undefined);
+    }, { writeAccess: async () => { throw new PreSubmissionRpcError(stage); } });
+  }
 });
 
 test('one in-process write lock rejects a concurrent write with 409', async () => {

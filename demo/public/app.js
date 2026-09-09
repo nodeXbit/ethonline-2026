@@ -1,4 +1,4 @@
-import { createAccessActionHandler } from './access-action.js';
+import { createAccessActionHandler, createJsonRequester } from './access-action.js';
 
 const card = document.querySelector('#key-card');
 const actionButton = document.querySelector('#action-button');
@@ -68,12 +68,7 @@ function render(credential) {
   }
 }
 
-async function requestJson(path, options) {
-  const response = await fetch(path, { ...options, headers: { Accept: 'application/json' } });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.error?.message || `Request failed (${response.status}).`);
-  return body;
-}
+const requestJson = createJsonRequester();
 
 async function refresh() {
   const credential = await requestJson('/api/credential');

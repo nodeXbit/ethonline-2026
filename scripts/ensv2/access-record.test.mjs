@@ -7,14 +7,28 @@ import {
   isAuthorized, PermissionedResolverImpl, predictResolver, readCredential, resolverAbi, resolverRoles,
 } from './access-record.mjs';
 import {
-  accessTransactionState, nextAccess, PendingAccessTransaction, publicErrorDetails,
-  requireSameCredential, registrationExpiry, RevertedAccessTransaction, setupCredential, updateAccess,
+  accessTransactionState, isTransientRpcError, nextAccess, PendingAccessTransaction, publicErrorDetails,
+  PreSubmissionRpcError, requireSameCredential, registrationExpiry, RevertedAccessTransaction,
+  setupCredential, updateAccess,
 } from './persistent-access.mjs';
 import { normalizeUid, parseDetectionLine } from '../nfc/bridge.mjs';
 
 const owner = '0x1111111111111111111111111111111111111111';
 const resolver = '0x2222222222222222222222222222222222222222';
 const parentOwner = '0x3333333333333333333333333333333333333333';
+const transientRpcError = () => Object.assign(new Error('HTTP request failed.'), {
+  name: 'HttpRequestError',
+});
+
+test('transient RPC classification excludes deterministic contract and ABI failures', () => {
+  assert.equal(isTransientRpcError(transientRpcError()), true);
+  assert.equal(isTransientRpcError({
+    name: 'ContractFunctionExecutionError',
+    cause: { name: 'ContractFunctionRevertedError', data: { errorName: 'Unauthorized' },
+      cause: transientRpcError() },
+  }), false);
+  assert.equal(isTransientRpcError({ name: 'AbiDecodingDataSizeTooSmallError', code: 503 }), false);
+});
 
 test('access.v1 round trips inactive/active and uint64 boundaries', () => {
   for (const active of [false, true]) {
@@ -97,19 +111,35 @@ function chain(options = {}) {
     timestamp: 100n, blockNumber: 42n, pending: false, ...options,
   };
   const writes = [];
+  const writeAttempts = [];
   const calls = [];
+  const nonceCalls = { latest: 0, pending: 0 };
   let lastReceipt;
   const equals = isAddressEqual;
   const client = {
     getChainId: async () => state.chainId ?? 11155111,
     getBlock: async () => {
+      if (writes.length === 0 && state.credentialReadFailures > 0) {
+        state.credentialReadFailures--;
+        throw transientRpcError();
+      }
       if (writes.length > 0 && state.readbackFailures > 0) {
         state.readbackFailures--;
         throw Error('Temporary credential readback failure');
       }
       return { number: state.blockNumber, timestamp: state.timestamp };
     },
-    getTransactionCount: async ({ blockTag }) => blockTag === 'pending' && state.pending ? 1 : 0,
+    getTransactionCount: async ({ blockTag }) => {
+      nonceCalls[blockTag]++;
+      const failureKey = blockTag === 'latest' ? 'latestNonceFailures' : 'pendingNonceFailures';
+      const failureCallKey = blockTag === 'latest'
+        ? 'latestNonceFailureOnCall' : 'pendingNonceFailureOnCall';
+      if (state[failureCallKey] === nonceCalls[blockTag] || state[failureKey] > 0) {
+        state[failureKey]--;
+        throw transientRpcError();
+      }
+      return blockTag === 'pending' && state.pending ? 1 : 0;
+    },
     getCode: async args => {
       if (args.blockNumber !== undefined) assert.equal(args.blockNumber, state.blockNumber);
       if (equals(args.address, predicted) || equals(args.address, resolver)) return state.deployed ? '0x1234' : '0x';
@@ -146,6 +176,10 @@ function chain(options = {}) {
     },
     simulateContract: async request => {
       calls.push('simulate:' + request.functionName);
+      if (request.functionName === 'setData' && state.simulationFailures > 0) {
+        state.simulationFailures--;
+        throw transientRpcError();
+      }
       if (request.functionName === 'setData' && state.noControl) throw Error('Missing setData role');
       if (request.functionName === 'register' && state.noRegistrar) throw Error('Missing registrar role');
       if (request.functionName === 'deployProxy') {
@@ -176,6 +210,11 @@ function chain(options = {}) {
   };
   const context = { account: { address: owner }, publicClient: client,
     walletClient: { writeContract: async request => {
+      writeAttempts.push(request.functionName);
+      if (state.writeFailures > 0) {
+        state.writeFailures--;
+        throw transientRpcError();
+      }
       assert.equal(state.pending, false);
       writes.push(request.functionName);
       state.blockNumber++;
@@ -204,7 +243,7 @@ function chain(options = {}) {
       return hash;
     } },
   };
-  return { state, writes, calls, client, context };
+  return { state, writes, writeAttempts, calls, client, context };
 }
 
 const registered = { status: REGISTERED, deployed: true, expiry: 1000000n };
@@ -311,6 +350,58 @@ test('pending DEV nonce blocks a new access action before or after simulation', 
     await assert.rejects(updateAccess(c.context, 'activate'), PendingAccessTransaction);
     assert.deepEqual(c.writes, []);
   }
+});
+
+test('transient credential, nonce and simulation failures retry before one write', async () => {
+  for (const failures of [
+    { credentialReadFailures: 1 },
+    { latestNonceFailures: 1 },
+    { pendingNonceFailures: 1 },
+    { latestNonceFailureOnCall: 2 },
+    { pendingNonceFailureOnCall: 2 },
+    { simulationFailures: 1 },
+  ]) {
+    const c = chain({ ...registered, access: inactive, ...failures });
+    const result = await updateAccess(c.context, 'activate', {
+      preSubmissionRetryOptions: { retryDelays: [0, 0], sleep: async () => {} },
+    });
+    assert.equal(result.changed, true);
+    assert.deepEqual(c.writeAttempts, ['setData']);
+    assert.deepEqual(c.writes, ['setData']);
+  }
+});
+
+test('exhausted transient pre-submission failure is retryable and writes nothing', async () => {
+  const c = chain({ ...registered, access: inactive, simulationFailures: 3 });
+  await assert.rejects(updateAccess(c.context, 'activate', {
+    preSubmissionRetryOptions: { retryDelays: [0, 0, 0], sleep: async () => {} },
+  }), error => {
+    assert.ok(error instanceof PreSubmissionRpcError);
+    assert.equal(error.stage, 'access update simulation');
+    assert.equal(error.noTransactionSent, true);
+    assert.equal(error.transactionHash, undefined);
+    return true;
+  });
+  assert.deepEqual(c.writeAttempts, []);
+  assert.deepEqual(c.writes, []);
+});
+
+test('deterministic simulation failure is not retried', async () => {
+  const c = chain({ ...registered, access: inactive, noControl: true });
+  await assert.rejects(updateAccess(c.context, 'activate', {
+    preSubmissionRetryOptions: { retryDelays: [0, 0, 0], sleep: async () => {} },
+  }), /Missing setData role/);
+  assert.equal(c.calls.filter(call => call === 'simulate:setData').length, 1);
+  assert.deepEqual(c.writeAttempts, []);
+});
+
+test('writeContract transport failure is never automatically retried', async () => {
+  const c = chain({ ...registered, access: inactive, writeFailures: 1 });
+  await assert.rejects(updateAccess(c.context, 'activate', {
+    preSubmissionRetryOptions: { retryDelays: [0, 0, 0], sleep: async () => {} },
+  }), error => error.name === 'HttpRequestError');
+  assert.deepEqual(c.writeAttempts, ['setData']);
+  assert.deepEqual(c.writes, []);
 });
 
 test('confirmed reverted access transaction retains its hash without resubmission', async () => {
