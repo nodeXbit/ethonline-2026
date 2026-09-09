@@ -131,6 +131,8 @@ button:disabled { cursor: wait; opacity: .5; }
 .feedback { margin: 0; color: #919ba8; font-size: 13px; line-height: 1.5; }
 .feedback.is-error { color: #ffb37e; }
 .feedback.is-success { color: #83eec1; }
+.feedback.is-warning { color: #ffd27d; }
+.feedback.is-pending { color: #ffd27d; font-weight: 800; letter-spacing: .04em; }
 
 footer { margin-top: 35px; color: #68727f; font-size: 11px; letter-spacing: .04em; }
 .live-mark { display: flex; align-items: center; gap: 7px; }

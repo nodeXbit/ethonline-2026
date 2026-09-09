@@ -13,6 +13,7 @@ function snapshot(overrides = {}) {
   return {
     state: { status: 2 }, owner, expiry: 1_900_000_000n,
     tokenId: 123456789012345678901234567890n, resolver,
+    block: { number: 42n, timestamp: 1_700_000_000n },
     access: { active: false, validUntil: 1_800_000_000n }, authorized: false,
     privateKey: 'must-not-leak', rpcUrl: 'https://rpc.example/secret',
     walletClient: { account: 'must-not-leak' }, ...overrides,
@@ -24,7 +25,7 @@ async function withServer(run, overrides = {}) {
   const dependencies = {
     readState: async () => state,
     writeAccess: async () => ({ transactionHash, credential: state }),
-    ...overrides,
+    ...(typeof overrides === 'function' ? overrides(state) : overrides),
   };
   const server = createServer(createDemoHandler(dependencies));
   await new Promise((resolve, reject) => {
@@ -75,7 +76,7 @@ test('public credential serialization keeps chain integers as strings and exclud
 
 test('static and API routes are explicitly allowlisted with 404 and 405 handling', async () => {
   await withServer(async port => {
-    for (const path of ['/', '/index.html', '/styles.css', '/app.js']) {
+    for (const path of ['/', '/index.html', '/styles.css', '/app.js', '/access-action.js']) {
       assert.equal((await request(port, path)).status, 200);
     }
     assert.equal((await request(port, '/package.json')).status, 404);
@@ -109,7 +110,7 @@ test('one in-process write lock rejects a concurrent write with 409', async () =
   await withServer(async port => {
     const first = request(port, '/api/activate', { method: 'POST', headers: validWriteHeaders });
     await started;
-    const second = await request(port, '/api/deactivate', {
+    const second = await request(port, '/api/activate', {
       method: 'POST', headers: validWriteHeaders,
     });
     assert.equal(second.status, 409);
@@ -121,6 +122,42 @@ test('one in-process write lock rejects a concurrent write with 409', async () =
     return { transactionHash, credential: snapshot() };
   } });
 });
+
+for (const action of ['activate', 'deactivate']) {
+  test(`sequential ${action} requests write once then return an idempotent no-op`, async () => {
+    let writes = 0;
+    await withServer(async port => {
+      const first = await request(port, `/api/${action}`, {
+        method: 'POST', headers: validWriteHeaders,
+      });
+      const second = await request(port, `/api/${action}`, {
+        method: 'POST', headers: validWriteHeaders,
+      });
+      assert.equal(first.status, 200);
+      assert.equal(second.status, 200);
+      assert.equal(JSON.parse(first.text).changed, true);
+      assert.deepEqual(JSON.parse(second.text), {
+        changed: false,
+        transactionHash: null,
+        credential: publicCredential(action === 'activate'
+          ? snapshot({ access: { active: true, validUntil: 1_800_000_000n }, authorized: true })
+          : snapshot()),
+      });
+      assert.equal(writes, 1);
+    }, state => {
+      if (action === 'deactivate') {
+        state.access.active = true;
+        state.authorized = true;
+      }
+      return { writeAccess: async requested => {
+        writes++;
+        state.access.active = requested === 'activate';
+        state.authorized = requested === 'activate';
+        return { changed: true, transactionHash, credential: state };
+      } };
+    });
+  });
+}
 
 test('safe errors expose only allowed fields and redact URLs', () => {
   const error = new Error('RPC failed via https://rpc.example/private-token');

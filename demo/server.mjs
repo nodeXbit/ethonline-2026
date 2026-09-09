@@ -5,7 +5,9 @@ import { createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
 import { readCredential, credentialLabel, parentName } from '../scripts/ensv2/access-record.mjs';
 import { connect, requireCondition } from '../scripts/ensv2/contracts.mjs';
-import { publicErrorDetails, updateAccess } from '../scripts/ensv2/persistent-access.mjs';
+import {
+  accessStateAchieved, publicErrorDetails, updateAccess,
+} from '../scripts/ensv2/persistent-access.mjs';
 
 export const demoHost = '127.0.0.1';
 export const demoPort = 4173;
@@ -17,6 +19,8 @@ const staticRoutes = new Map([
   ['/index.html', { file: new URL('./public/index.html', import.meta.url), type: 'text/html; charset=utf-8' }],
   ['/styles.css', { file: new URL('./public/styles.css', import.meta.url), type: 'text/css; charset=utf-8' }],
   ['/app.js', { file: new URL('./public/app.js', import.meta.url), type: 'text/javascript; charset=utf-8' }],
+  ['/access-action.js', { file: new URL('./public/access-action.js', import.meta.url),
+    type: 'text/javascript; charset=utf-8' }],
 ]);
 
 const statusNames = ['AVAILABLE', 'RESERVED', 'REGISTERED'];
@@ -151,8 +155,12 @@ export function createDemoHandler({ readState, writeAccess, loadStatic = readFil
       writePending = true;
       const action = path === '/api/activate' ? 'activate' : 'deactivate';
       try {
-        const result = await writeAccess(action);
+        const before = await readState();
+        const result = accessStateAchieved(before, action)
+          ? { changed: false, transactionHash: null, credential: before }
+          : await writeAccess(action);
         sendJson(response, 200, {
+          changed: result.changed ?? true,
           transactionHash: result.transactionHash,
           credential: publicCredential(result.credential),
         });

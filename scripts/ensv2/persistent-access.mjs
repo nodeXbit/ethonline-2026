@@ -96,6 +96,17 @@ async function setupSend(context, contract, predictedResolver) {
   }
 }
 
+export function accessStateAchieved(snapshot, action) {
+  requireCondition(action === 'activate' || action === 'deactivate',
+    'Access action must be activate or deactivate.');
+  requireRegistered(snapshot);
+  requireCondition(!isAddressEqual(snapshot.resolver, zeroAddress), 'Credential has no resolver.');
+  requireCondition(snapshot.access !== null, 'access.v1 is not configured; inspect setup evidence.');
+  if (action === 'deactivate') return snapshot.access.active === false;
+  return snapshot.access.active === true && snapshot.access.validUntil > snapshot.block.timestamp &&
+    snapshot.authorized === true;
+}
+
 const safeMessage = value => String(value).split(/\r?\n/, 1)[0]
   .replace(/https?:\/\/\S+/gi, '[redacted URL]');
 
@@ -238,8 +249,14 @@ export async function updateAccess(context, action) {
     'Access action must be activate or deactivate.');
   stage = 'access update preflight';
   const before = await readCredential(context.publicClient, { includeParent: true });
-  requireRegistered(before);
-  requireCondition(!isAddressEqual(before.resolver, zeroAddress), 'Credential has no resolver.');
+  if (accessStateAchieved(before, action)) {
+    return {
+      changed: false,
+      transactionHash: null,
+      blockNumber: before.block.number,
+      credential: before,
+    };
+  }
   const access = nextAccess(action, before.access, before.block.timestamp);
   stage = 'simulated access update and receipt';
   const transaction = await send(context, dataCall(before.resolver, access));
@@ -250,6 +267,7 @@ export async function updateAccess(context, action) {
   requireSameCredential(before, after);
   requireCondition(sameAccess(after.access, access), 'Access readback mismatch.');
   return {
+    changed: true,
     transactionHash: transaction.receipt.transactionHash,
     blockNumber: transaction.receipt.blockNumber,
     credential: after,

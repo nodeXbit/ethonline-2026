@@ -1,3 +1,5 @@
+import { createAccessActionHandler } from './access-action.js';
+
 const card = document.querySelector('#key-card');
 const actionButton = document.querySelector('#action-button');
 const feedback = document.querySelector('#feedback');
@@ -79,26 +81,25 @@ async function refresh() {
   return credential;
 }
 
-async function changeAccess() {
-  if (!confirmedCredential || pending || !isCredentialUsable(confirmedCredential)) return;
-  const deactivate = confirmedCredential.authorization === 'ALLOW';
-  const action = deactivate ? 'deactivate' : 'activate';
-  pending = true;
-  actionButton.disabled = true;
-  actionButton.textContent = deactivate ? 'Deactivating…' : 'Activating…';
-  setFeedback(`${deactivate ? 'Deactivating' : 'Activating'} on Sepolia…`);
-
-  try {
-    const result = await requestJson(`/api/${action}`, { method: 'POST' });
-    await refresh();
-    setFeedback(`${deactivate ? 'Deactivation' : 'Activation'} confirmed · ${shorten(result.transactionHash)}`, 'success');
-  } catch (error) {
-    setFeedback(error instanceof Error ? error.message : 'The update failed. You can retry.', 'error');
-  } finally {
-    pending = false;
-    if (confirmedCredential) render(confirmedCredential);
-  }
-}
+const changeAccess = createAccessActionHandler({
+  getCredential: () => confirmedCredential,
+  isCredentialUsable,
+  requestJson,
+  render,
+  setFeedback,
+  shorten,
+  setPending(action, value) {
+    pending = value;
+    if (value) {
+      actionButton.disabled = true;
+      actionButton.textContent = action === 'deactivate' ? 'Deactivating…' : 'Activating…';
+      setFeedback(`${action === 'deactivate' ? 'DEACTIVATING' : 'ACTIVATING'} ON SEPOLIA — DO NOT CLICK AGAIN`,
+        'pending');
+    } else if (confirmedCredential) {
+      render(confirmedCredential);
+    }
+  },
+});
 
 actionButton.addEventListener('click', changeAccess);
 

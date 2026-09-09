@@ -196,16 +196,43 @@ test('shared updateAccess confirms INACTIVE -> ACTIVE -> INACTIVE with persisten
   const c = chain({ ...registered, access: inactive });
   const before = await readCredential(c.client, { includeParent: true });
   const activated = await updateAccess(c.context, 'activate');
+  assert.equal(activated.changed, true);
   assert.equal(activated.credential.authorized, true);
   assert.equal(activated.credential.access.active, true);
   assert.match(activated.transactionHash, /^0x[0-9a-f]{64}$/);
   requireSameCredential(before, activated.credential);
 
   const deactivated = await updateAccess(c.context, 'deactivate');
+  assert.equal(deactivated.changed, true);
   assert.equal(deactivated.credential.authorized, false);
   assert.equal(deactivated.credential.access.active, false);
   requireSameCredential(activated.credential, deactivated.credential);
   assert.deepEqual(c.writes, ['setData', 'setData']);
+});
+
+test('sequential activation and deactivation are semantic no-ops after the first write', async () => {
+  const activating = chain({ ...registered, access: inactive });
+  assert.equal((await updateAccess(activating.context, 'activate')).changed, true);
+  const activeNoOp = await updateAccess(activating.context, 'activate');
+  assert.equal(activeNoOp.changed, false);
+  assert.equal(activeNoOp.transactionHash, null);
+  assert.deepEqual(activating.writes, ['setData']);
+
+  const deactivating = chain({ ...registered, access: active });
+  assert.equal((await updateAccess(deactivating.context, 'deactivate')).changed, true);
+  const inactiveNoOp = await updateAccess(deactivating.context, 'deactivate');
+  assert.equal(inactiveNoOp.changed, false);
+  assert.equal(inactiveNoOp.transactionHash, null);
+  assert.deepEqual(deactivating.writes, ['setData']);
+});
+
+test('activation renews an active but expired access deadline exactly once', async () => {
+  const c = chain({ ...registered, access: encodeAccess({ active: true, validUntil: 100n }) });
+  const result = await updateAccess(c.context, 'activate');
+  assert.equal(result.changed, true);
+  assert.equal(result.credential.access.active, true);
+  assert.ok(result.credential.access.validUntil > result.credential.block.timestamp);
+  assert.deepEqual(c.writes, ['setData']);
 });
 
 test('updateAccess cannot report success without requested confirmed readback', async () => {
