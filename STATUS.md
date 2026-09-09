@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Build the smallest interactive visual demo for the verified persistent credential lifecycle, showing the credential as a dynamic digital key whose presentation changes with ENSv2 access state.
+Perform sponsor-qualification and 30-second demo audit, then choose the smallest remaining improvement required for submission quality.
 
 ## Done
 
@@ -24,10 +24,14 @@ Build the smallest interactive visual demo for the verified persistent credentia
 - Persistent physical credential slice: PASS. UserRegistry ownership kept `cred-001.demo-access.eth` REGISTERED while PermissionedResolver `access.v1` independently changed physical authorization from inactive to active to inactive.
 - Persistent identity invariants were preserved throughout validation: owner, tokenId, resolver, and registry expiry did not change.
 - The physical NFC UID remains a clonable prototype/demo identifier, not production proof of possession or anti-cloning security.
+- Interactive visual demo: PASS. The browser UI drives real ENSv2 `access.v1` state through one-click ACTIVE/INACTIVE actions while the persistent credential remains visible and REGISTERED.
+- Semantic no-op protection, client in-flight locking, pending-nonce checks, pre-submit RPC retries, and post-submit hash recovery prevent duplicate access writes across failure boundaries.
+- Final dedicated-RPC validation reproduced NFC `DENY -> ALLOW -> DENY`, preserved credential identity, required no manual browser refresh, and ended with no pending DEV transaction.
+- A dedicated Sepolia RPC configured through the existing local environment improved demo reliability; no endpoint or key is stored in the repository.
 
 ## Next
 
-1. Build the smallest interactive visual demo for the verified persistent credential lifecycle, showing the credential as a dynamic digital key whose presentation changes with ENSv2 access state.
+1. Perform sponsor-qualification and 30-second demo audit, then choose the smallest remaining improvement required for submission quality.
 
 ## Blockers
 

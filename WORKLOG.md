@@ -46,3 +46,15 @@ No product code has been written yet.
 - Confirmed that rerunning persistent setup while ACTIVE was idempotent: it sent no transaction, did not re-register the credential, and did not reset access.
 - Recovery/debugging lesson: reconstruct public nonces, receipts, resolver provenance, roles, and pinned-block state before retrying. Safe errors must retain stage, operation, custom error/RPC code, and any public transaction hash without exposing RPC credentials.
 - Conclusion: ENSv2 is load-bearing for physical authorization, while the credential survives access revocation. Ownership lifetime and access lifetime are now separate.
+
+### Interactive visual demo milestone
+
+- Implemented a local Node.js 24 browser demo whose digital key reads authoritative ENSv2 state and invokes only fixed access actions for `cred-001.demo-access.eth`; the DEV key remains server-side.
+- Early manual validation exposed duplicate-write risk around slow or failed RPC responses. Added semantic idempotency, a write lock, client in-flight protection, and pending-nonce guards.
+- Established explicit pre- and post-submission boundaries: safe reads and simulation receive bounded retries, while submitted hashes are retained for read-only receipt/readback recovery and are never automatically resubmitted.
+- A transient public Sepolia RPC failure produced an unhelpful pre-submission HTTP error. Structured public errors now identify the safe failing stage and whether no transaction was sent. A dedicated RPC was then selected through local `SEPOLIA_RPC_URL`; no endpoint or key is committed.
+- Activation `0x40997865f355673a84e30c020f04631e2bac34ccefd91996a70bd70f1ebeed05`, nonce `16`, block `11668615`, produced `ACTIVE / ALLOW`. Its repeated action returned `changed:false`, `transactionHash:null`, and no additional transaction.
+- Deactivation `0x5d0cfe3348509ae69ca719f8a0f1105d04a12445a10cd7a86ca0432419c428a9`, nonce `17`, block `11668637`, produced `INACTIVE / DENY`. Its repeated action returned `changed:false`, `transactionHash:null`; final latest/pending nonce was `18 / 18`.
+- The same physical tag `91:2D:E3:06` produced `DENY -> ALLOW -> DENY`. Visual QA confirmed immediate clear transitions, understandable pending feedback, one click per action, no manual refresh, and a credential card that never disappeared.
+- Identity remained REGISTERED with unchanged owner `0x4C60a5AD311510543B56d0408872A52e4AEEe19C`, tokenId `111633085976721986886445685281703791217854403259346662013299173065803998167042`, resolver `0x0B723c0C2170F2ea508F2f4e3e122C6c0782744C`, and registry expiry `1820447664`.
+- Main technical learning: visible state must always follow authoritative ENSv2 readback, and writes need distinct pre-submission retry and post-submission hash-recovery boundaries.
