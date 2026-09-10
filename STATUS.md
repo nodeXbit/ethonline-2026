@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Preserve the completed Gate E INACTIVE physical validation, then address the P0 safe-renewal gap for the existing REGISTERED INACTIVE `guest-001` record before attempting the still-pending ACTIVE/ALLOW physical milestone.
+Preserve the completed Gate E INACTIVE physical validation and run a read-only renewal preflight for the existing REGISTERED INACTIVE `guest-001` record before seeking explicit Control Tower authorization for at most one resolver `setData` write.
 
 ## Done
 - ChatGPT Project configured
@@ -53,6 +53,11 @@ Preserve the completed Gate E INACTIVE physical validation, then address the P0 
 - `guest-001.demo-access.eth` is REGISTERED to `0x3419148731087b970d2059C53780163B452D5FF7` with INACTIVE `access.v1`. Provisioning completed previously through `setData` transaction `0x34c47584a377bf6d77428d19a946a322d9d31fb040caf2bf40dc205bf97112bf` and `register` transaction `0x964e488bb056b86a72870251a46e91f569f4915fc102f2aeb573b71ae202f5da`.
 - GATE E INACTIVE PHYSICAL: PASS. One fresh physical proof produced `ACCESS_DENIED`; Node sent `AUTHORIZATION=DENY` exactly once and captured firmware `AUTHORIZATION: DENY` before closing COM4. Reuse of the same proof produced `REPLAYED_CHALLENGE` / DENY without new NFC, signing, challenge issuance, ENS read, or blockchain write. UID was unused.
 - GATE E ACTIVE PHYSICAL: PENDING.
+- BATCH A — DETERMINISTIC READINESS: PASS. Added explicit scoped renew-inactive tooling, semantic no-op when validity is already sufficient, and ACTIVE renewal refusal without changing activation/deactivation semantics.
+- Gate E now enforces a 50-second post-challenge total attempt deadline, an eight-second complete ENS verification budget, a two-second controller confirmation deadline, a 1,024-byte serial input bound, immediate terminal firmware STOP handling, and redacted physical-proof logging.
+- Coherent ENS authorization now accepts blocks at most 60 seconds old with at most 15 seconds of future skew and may use one optional fallback only by restarting the complete `readCredential` snapshot; provider reads are never mixed within a snapshot.
+- Batch A validation passed Node 134/134, scoped Gate E 42/42, Android 21/21 plus debug assembly, and Gate E firmware compilation.
+- No live `guest-001` renewal has been executed.
 
 ## Sponsor / architecture delta
 
@@ -73,13 +78,13 @@ Preserve the completed Gate E INACTIVE physical validation, then address the P0 
 
 ## Next
 
-1. Resolve the P0 tooling gap: safely renew an existing REGISTERED INACTIVE `guest-001` record while preserving INACTIVE before its `access.validUntil` deadline.
-2. After explicit authorization, validate the still-unproven ACTIVE physical ALLOW path with a fresh proof.
-3. Keep `cred-001`, NFC UID exclusion, APDU v1, and the one-shot Gate E session model unchanged.
+1. Run the read-only renewal preflight for `guest-001`.
+2. After explicit Control Tower authorization, permit at most one resolver `setData` write to renew the still-INACTIVE record.
+3. Separately, after explicit authorization, validate the still-unproven ACTIVE physical ALLOW path with a fresh proof while keeping `cred-001`, NFC UID exclusion, APDU v1, and the one-shot Gate E session model unchanged.
 
 ## Blockers
 
-- Current tooling cannot safely renew an existing REGISTERED INACTIVE record while preserving INACTIVE. `guest-001` has `access.validUntil = 1789107864` (2026-09-11 08:24:24 Europe/Madrid); this is the immediate P0.
+- The safe renew-inactive tooling is implemented and validated locally, but its read-only `guest-001` preflight and any separately authorized resolver write have not yet been executed.
 - Gate E ACTIVE/ALLOW physical validation remains pending explicit authorization after the validity risk is handled.
 - World Selfie Check sandbox/access is an external dependency only if World is selected as a secondary sponsor.
 

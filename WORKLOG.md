@@ -164,3 +164,14 @@ No product code has been written yet.
 - GATE E INACTIVE PHYSICAL: PASS. GATE E ACTIVE PHYSICAL: PENDING.
 - Immediate P0: `guest-001` has `access.validUntil = 1789107864` (2026-09-11 08:24:24 Europe/Madrid), while current tooling cannot safely renew an existing REGISTERED INACTIVE record and preserve INACTIVE.
 
+### Batch A — deterministic readiness checkpoint
+
+- Added an explicit, credential-scoped renew-inactive operation. Administrative validity extension is no longer hidden inside activate/deactivate; sufficient validity is a semantic no-op and ACTIVE credentials are refused.
+- Proved from control flow and tests that read-only preflight may read and simulate but cannot call `writeContract`, enter transaction-hash recovery, broadcast, or increment the account nonce. No live `guest-001` renewal was executed.
+- Kept Gate A's 60-second challenge TTL while bounding the complete Gate E lifetime after challenge issuance to 50 seconds, including an eight-second ENS budget and two-second firmware-confirmation budget.
+- Terminal state and deadline guards prevent a late proof, late ENS result, or already-computed late ALLOW from escaping after the total deadline.
+- Firmware-local STOP now terminates Node immediately, physical-proof content is redacted, and the serial parser permanently poisons an attempt after its 1,024-byte pre-newline bound is exceeded.
+- RPC recovery uses at most one optional fallback and restarts the entire coherent pinned-block snapshot on that provider; it never mixes owner, resolver, or policy reads across providers.
+- Fresh validation passed Node 134/134, scoped Gate E 42/42, Android 21/21 plus debug assembly, and Gate E firmware compilation. Android source, Gate A, Gate D, APDU v1, and established `cred-001` behavior remained unchanged.
+- GATE E INACTIVE PHYSICAL: PASS. GATE E ACTIVE PHYSICAL: PENDING. This checkpoint performed zero blockchain writes and zero physical NFC attempts.
+

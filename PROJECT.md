@@ -24,7 +24,7 @@
 
 ## Security upgrade direction
 
-The fresh cryptographic holder-proof architecture and physical Gate E INACTIVE/DENY path are verified. The immediate security objective is safe renewal of the existing REGISTERED INACTIVE guest record before its validity deadline; physical ACTIVE/ALLOW remains the next unproven Gate E result.
+The fresh cryptographic holder-proof architecture and physical Gate E INACTIVE/DENY path are verified. Explicit renew-inactive tooling and deterministic Gate E timing, serial, and coherent-snapshot bounds are implemented and locally validated; no live guest renewal has been executed. The immediate objective is a read-only `guest-001` renewal preflight, followed only with explicit Control Tower authorization by at most one resolver `setData` write. Physical ACTIVE/ALLOW remains the next unproven Gate E result.
 
 Implemented local composition:
 

@@ -558,3 +558,37 @@ The first successful physical Gate E INACTIVE authorization proved the entire cr
 ### Revisit when
 
 Measured serial behavior requires a different bounded timeout, or a documented controller protocol replaces the current line confirmation. Do not weaken exact-match or fail-closed behavior.
+
+---
+
+## D-018 — Gate E deterministic readiness uses bounded, coherent attempts
+
+**Status:** Accepted
+**Date:** 2026-09-10
+
+### Decision
+
+Keep the Gate A cryptographic challenge TTL at 60 seconds and bound every Gate E attempt to 50 seconds beginning immediately after challenge issuance. Within that lifetime, allow at most eight seconds for the complete ENS verification and two seconds for firmware confirmation. Accept a pinned block at most 60 seconds old and at most 15 seconds in the future.
+
+Bound serial input to 1,024 bytes before newline and poison the current attempt permanently on overflow. Treat firmware STOP as immediate, public terminal telemetry containing only stage/reason information. Do not redesign APDU v1, session IDs, or the PN532 protocol.
+
+Make validity extension an explicit renew-inactive operation. It must preserve `active=false`, refuse ACTIVE credentials, and be a semantic no-op when the existing deadline is sufficient. Activation and deactivation semantics remain unchanged.
+
+An optional RPC fallback may retry only by restarting the entire pinned-block `readCredential` snapshot on the fallback client. Do not use transparent per-call multi-provider fallback or combine owner, resolver, and policy values from different providers.
+
+### Why
+
+The cryptographic challenge must outlive the deliberately shorter physical attempt, while every async result and controller command remains subject to one terminal deadline. A complete snapshot belongs to one provider/client and one pinned block; partial provider recovery would make the authorization evidence incoherent.
+
+Explicit renewal prevents an administrative validity change from being coupled accidentally to ordinary access-state controls. Bounded serial memory and immediate public STOP telemetry keep firmware failures deterministic and fail closed.
+
+### Consequences
+
+- Late proof, late ENS completion, or a computed ALLOW that reaches the deadline cannot authorize or be sent to firmware.
+- A failed primary snapshot is discarded in full before the optional fallback begins.
+- Read-only renewal preflight may read and simulate but cannot broadcast or enter post-broadcast recovery.
+- Gate E INACTIVE physical remains PASS; Gate E ACTIVE physical remains PENDING and is not claimed by this decision.
+
+### Revisit when
+
+Measured end-to-end behavior provides evidence that a bound must change without weakening fail-closed, whole-snapshot, or one-shot semantics.
