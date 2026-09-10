@@ -2,9 +2,9 @@
 
 ## Current objective
 
-Gate C2: connect the already-proven Privy Android EIP-712 signer to the HCE `ProofProvider` abstraction while preserving APDU v1 and Gate A/B semantics.
+Gate D: implement the smallest ESP32-S3 + Elechouse PN532 initiator/APDU path and prove a real physical SELECT / SEND_CHALLENGE / GET_STATUS / GET_SIGNATURE exchange with the Seeker `HostApduService`.
 
-Keep PN532 firmware unchanged during Gate C2.
+Gate D must preserve APDU v1 and must not introduce blockchain or ENS authorization yet.
 
 ## Done
 - ChatGPT Project configured
@@ -37,6 +37,10 @@ Keep PN532 firmware unchanged during Gate C2.
 - Android HCE protocol Gate C1: PASS. `HostApduService` is registered under the non-payment proprietary AID `F0454E5356324331`, with deterministic APDU v1 transporting the fixed 104-byte binary `AccessChallenge`.
 - Gate C1 implements the explicit `IDLE` / `PROCESSING` / `READY` / `ERROR` session model, an exact 65-byte proof response, session reset behavior, and stale asynchronous completion protection behind a replaceable `ProofProvider`.
 - Gate C1 Android JVM tests and debug assembly pass, and the complete Node suite remains green at 82/82.
+- Privy HCE signing Gate C2: PASS. One application-scoped Privy instance and shared `HceApduProcessor` now serve both the Android activity harness and `HostApduService` through the production `PrivyProofProvider`.
+- Gate C2 reconstructs the exact Gate A `ENSv2 Access` EIP-712 typed data from the binary `HceChallenge`, schedules `eth_signTypedData_v4` asynchronously, and preserves C1 stale-completion invalidation and the exact 65-byte proof contract.
+- The production manual APDU harness passed on the Seeker. Privy wallet `0x3419148731087b970d2059C53780163B452D5FF7` produced a 65-byte proof, and Node recovered the same address (`MATCH: PASS`).
+- Gate C2 validation passed all 21 Android JVM tests, Android debug assembly, and the complete 83-test Node suite.
 
 ## Sponsor / architecture delta
 
@@ -57,15 +61,15 @@ Keep PN532 firmware unchanged during Gate C2.
 
 ## Next
 
-1. Implement Gate C2 by connecting the proven Privy Android EIP-712 signer to `ProofProvider`.
-2. Preserve the Gate C1 APDU v1 contract and all Gate A/B cryptographic semantics.
-3. Keep PN532 firmware unchanged until Gate C2 passes.
-4. Preserve the static NFC UID exclusion: it remains outside secure authorization.
+1. Implement the minimal ESP32-S3 + Elechouse PN532 initiator/APDU path for Gate D.
+2. Prove a real SELECT / SEND_CHALLENGE / GET_STATUS / GET_SIGNATURE exchange with the Seeker.
+3. Preserve the frozen Gate C APDU v1 contract.
+4. Do not add blockchain/ENS authorization yet, and keep static NFC UID outside secure authorization.
 
 ## Blockers
 
 - Transport of the proven wallet signature over the physical NFC/HCE path is not yet validated.
-- Gate C1 proves deterministic Android-side HCE protocol behavior only. It does not prove Privy signing from HCE, real phone-to-PN532 communication, or physical cryptographic authorization.
+- Gate C2 proves real Privy signing through the production HCE processor/provider path, but real phone-to-PN532 APDU interoperability and physical cryptographic authorization remain unproven.
 - World Selfie Check sandbox/access is an external dependency only if World is selected as a secondary sponsor.
 
 ## Risks
@@ -132,3 +136,18 @@ SELECT proprietary non-payment AID
 The implementation resets proof state on a new challenge, SELECT, or HCE deactivation and prevents stale provider completions from affecting newer sessions. Android JVM tests and `assembleDebug` pass, while the existing Node suite remains green at 82/82.
 
 Gate C1 does not yet prove Privy signing from HCE, real phone-to-PN532 communication, or physical cryptographic authorization.
+
+Gate C2 additionally proves the real signing integration through the production HCE path:
+
+```text
+manual APDU harness
+  -> application-scoped HceApduProcessor
+  -> production PrivyProofProvider
+  -> asynchronous eth_signTypedData_v4
+  -> exact 65-byte proof
+  -> Node/viem recovered signer match
+```
+
+On the Seeker, public wallet `0x3419148731087b970d2059C53780163B452D5FF7` matched the recovered signer. Android passed 21/21 JVM tests and `assembleDebug`; Node passed 83/83 tests. The real signature is not stored in the repository.
+
+Gate C2 proves real Privy signing through the production HCE processor/provider path. It does not yet prove actual phone-to-PN532 NFC interoperability, physical cryptographic access, or ENS credential ownership by the Privy wallet.

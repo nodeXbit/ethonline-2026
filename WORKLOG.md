@@ -111,3 +111,16 @@ No product code has been written yet.
 - No phone-to-reader NFC exchange was performed or claimed. Gate C1 proves deterministic Android-side HCE protocol behavior only.
 - Technical learning: NFC/HCE is only the transport layer. Replay security remains authoritative in Gate A, while cryptographic signing remains separated behind `ProofProvider` for Gate C2.
 
+### Privy HCE signer Gate C2 milestone
+
+- Reused one application-scoped Privy SDK instance and one shared `HceApduProcessor` for both the activity harness and Android `HostApduService`; no competing login/session state was introduced.
+- Added the production `PrivyProofProvider`, which reads an existing authenticated embedded Ethereum wallet, reconstructs canonical Gate A typed data from `HceChallenge`, calls `eth_signTypedData_v4`, and accepts only an exact 65-byte result.
+- Centralized the Android `ENSv2 Access` version `1`, Sepolia chain ID `11155111`, `AccessChallenge` typed-data builder. The APDU v1 AID, commands, 104-byte challenge, states, and proof format remain unchanged.
+- Preserved asynchronous behavior: SEND_CHALLENGE returns in PROCESSING while signing continues, and the reader/harness polls GET_STATUS until READY or ERROR.
+- Preserved C1 generation/session invalidation for a newer challenge, SELECT/reset, and HCE deactivation. Missing authentication/wallet, signing failure, or malformed output fails safely without creating a wallet.
+- The manual in-app APDU harness exercised the production processor/provider path on a real Solana Seeker. Native `eth_signTypedData_v4` returned a 65-byte signature for public wallet `0x3419148731087b970d2059C53780163B452D5FF7`.
+- Node/viem recovered `0x3419148731087b970d2059C53780163B452D5FF7` from that public proof (`MATCH: PASS`). The real signature was not stored in the repository.
+- Android passed 21 JVM tests and `:app:assembleDebug`; the complete Node suite passed 83/83.
+- No PN532 exchange occurred during Gate C2. Real phone-to-PN532 interoperability remains Gate D.
+- Technical learning: asynchronous cryptographic signing and NFC transport are separated by the HCE state machine. SEND_CHALLENGE does not wait for network signing; the reader polls GET_STATUS until READY.
+

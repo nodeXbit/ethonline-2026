@@ -416,3 +416,44 @@ Gate A remains authoritative for cryptographic one-shot replay protection; HCE i
 ### Revisit when
 
 Only if physical interoperability proves an APDU-level incompatibility that cannot be resolved while preserving the current contract.
+
+---
+
+## D-014 — Gate C2 uses one application-scoped Privy HCE signer
+
+**Status:** Accepted
+**Date:** 2026-09-10
+
+### Decision
+
+Use one application-scoped Privy SDK instance and one shared `HceApduProcessor` for both the Android activity harness and `HostApduService`. `PrivyProofProvider` is the production HCE signer.
+
+The user must authenticate and explicitly create or reuse an embedded Ethereum wallet before holder-proof use. The HCE service reads an existing SDK-managed session/wallet and never creates a wallet.
+
+Gate A remains the canonical EIP-712 definition, and Gate C APDU v1 remains frozen. Signing is asynchronous:
+
+```text
+SEND_CHALLENGE -> PROCESSING -> READY / ERROR
+```
+
+C1 generation/session invalidation remains authoritative for stale completions after a newer challenge, SELECT/reset, or HCE deactivation. Only an exact 65-byte signature can enter READY.
+
+The wallet address is not transported over NFC because the verifier recovers the signer from the proof. The manual in-app APDU harness is validation infrastructure using the production processor/provider, not a separate authorization path.
+
+### Why
+
+The real Seeker validation proved that the production HCE path can asynchronously invoke Privy `eth_signTypedData_v4` and return an exact 65-byte Gate A-compatible proof whose Node-recovered signer matches the Privy wallet.
+
+Keeping session ownership application-scoped avoids competing Privy instances or duplicated login state. Keeping signing behind `ProofProvider` preserves the deterministic NFC transport contract.
+
+### Consequences
+
+- No OTP, auth token, private key, or App Secret is manually persisted or exposed.
+- Static NFC UID remains excluded from secure authorization.
+- Real phone-to-PN532 interoperability remains unproven until Gate D.
+- Gate C2 does not prove physical cryptographic access, ENS credential ownership by the Privy wallet, payment, Privy prize qualification, World, or ERC-4337.
+- Gate D must preserve APDU v1 and initially prove transport only, without blockchain/ENS authorization.
+
+### Revisit when
+
+Only if Android process behavior or physical reader interoperability demonstrates that the shared application-scoped architecture cannot preserve the frozen APDU contract.
