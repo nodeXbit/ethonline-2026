@@ -1,19 +1,21 @@
 import { pathToFileURL } from 'node:url';
 import {
-  concatHex, createPublicClient, http, keccak256, numberToHex, stringToHex,
+  concatHex, createPublicClient, http, numberToHex,
 } from 'viem';
 import { sepolia } from 'viem/chains';
-import { credentialIdentity, readCredential } from '../ensv2/access-record.mjs';
+import { readCredential } from '../ensv2/access-record.mjs';
+import { demoConfig } from './demo-config.mjs';
+import { recordAttempt } from '../../demo/evidence.mjs';
 import { requireCondition } from '../ensv2/contracts.mjs';
 import { gateESerialMaxLineBytes, gateETiming } from './gate-e-config.mjs';
 import {
   IssuedChallengeStore, issueAccessChallenge, verificationReason, verifyAccessAttempt,
 } from './holder-proof.mjs';
 
-export const gateECredential = credentialIdentity('guest-001');
-export const gateEIntendedOwner = '0x3419148731087b970d2059C53780163B452D5FF7';
-export const gateEResourceName = 'demo-access.eth:door-001';
-export const gateEResourceId = keccak256(stringToHex(gateEResourceName));
+export const gateECredential = demoConfig.credential;
+export const gateEIntendedOwner = demoConfig.expectedOwner;
+export const gateEResourceName = demoConfig.resourceName;
+export const gateEResourceId = demoConfig.resourceId;
 
 export const gateEOutcome = Object.freeze({
   TRANSPORT_FAILURE: 'TRANSPORT_FAILURE',
@@ -504,7 +506,7 @@ export async function waitForBridgeAndClose(bridge, close) {
   }
 }
 
-export async function main(args = process.argv.slice(2)) {
+async function runBridge(args, captureBridge, preserveBoot) {
   const options = parseGateEArguments(args);
   const portPath = options.port ?? process.env.NFC_SERIAL_PORT?.trim();
   requireCondition(Boolean(portPath), 'NFC_SERIAL_PORT or --port is required.');
@@ -528,6 +530,7 @@ export async function main(args = process.argv.slice(2)) {
   });
   const verifyProof = async ({ challenge, signature, remainingMs }) => {
     let snapshotFailureReason;
+    let publicSnapshot;
     const result = await verifyAccessAttempt({
       store,
       nonce: challenge.nonce,
@@ -539,6 +542,8 @@ export async function main(args = process.argv.slice(2)) {
           const selected = await readGateECredentialSnapshot({
             primaryClient, fallbackClient, remainingMs,
           });
+          publicSnapshot = { currentEnsOwner: selected.snapshot.owner,
+            snapshotBlock: selected.snapshot.block.number.toString() };
           return selected.snapshot;
         } catch (error) {
           snapshotFailureReason = error instanceof GateESnapshotError
@@ -547,12 +552,14 @@ export async function main(args = process.argv.slice(2)) {
         }
       },
     });
-    return result.reason === verificationReason.ENS_STATE_ERROR && snapshotFailureReason
-      ? { ...result, ensFailureReason: snapshotFailureReason } : result;
+    return { ...result, ...publicSnapshot,
+      ...(result.reason === verificationReason.ENS_STATE_ERROR && snapshotFailureReason
+        ? { ensFailureReason: snapshotFailureReason } : {}) };
   };
 
   const { SerialPort } = await import('serialport');
-  const port = new SerialPort({ path: portPath, baudRate: 115200, autoOpen: false });
+  const port = new SerialPort({ path: portPath, baudRate: 115200, autoOpen: false,
+    ...(preserveBoot ? { hupcl: false, rtscts: false } : {}) });
   await new Promise((resolve, reject) => {
     port.open(error => error ? reject(error) : resolve());
   });
@@ -563,6 +570,7 @@ export async function main(args = process.argv.slice(2)) {
     sendLine: line => writeLine(port, line),
     checkReplay: options.checkReplay,
   });
+  captureBridge(bridge);
   const lineBuffer = new GateELineBuffer();
   const receive = chunk => {
     const { lines, overflow } = lineBuffer.push(chunk);
@@ -583,6 +591,7 @@ export async function main(args = process.argv.slice(2)) {
   console.log(`CREDENTIAL: ${gateECredential.name}`);
   console.log(`RESOURCE: ${gateEResourceName}`);
   console.log(`RESOURCE_ID: ${gateEResourceId}`);
+  console.log('BRIDGE LISTENING: present Seeker only after PRESENT_SEEKER from this boot.');
   const result = await waitForBridgeAndClose(bridge, async () => {
     port.off('data', receive);
     port.off('error', serialFailure);
@@ -594,6 +603,11 @@ export async function main(args = process.argv.slice(2)) {
   if (options.checkReplay) {
     console.log(`REPLAY: ${bridge.replayResult?.reason ?? 'NOT_CHECKED'}`);
   }
+}
+
+export async function main(args = process.argv.slice(2), { preserveBoot = false } = {}) {
+  // Before opening serial or issuing a challenge; reporting never controls authorization.
+  return recordAttempt(capture => runBridge(args, capture, preserveBoot));
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {

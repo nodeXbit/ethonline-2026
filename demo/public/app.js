@@ -1,4 +1,5 @@
 import { createAccessActionHandler, createJsonRequester } from './access-action.js';
+import { attemptView } from './evidence-view.js';
 
 const card = document.querySelector('#key-card');
 const actionButton = document.querySelector('#action-button');
@@ -113,3 +114,35 @@ refresh().then(async credential => {
   actionButton.disabled = true;
   setFeedback(error instanceof Error ? error.message : 'Unable to read ENSv2 state.', 'error');
 });
+
+function renderEvidence(report) {
+  const view = attemptView(report);
+  const put = (id, value) => { document.getElementById(id).textContent = value ?? '—'; };
+  put('verifier-state', view.verifier);
+  put('controller-state', view.controller);
+  put('replay-state', view.replay);
+  document.getElementById('controller-card').classList.toggle('is-confirmed', view.confirmedAllow);
+  put('recovered-signer', report?.recoveredSigner);
+  put('attempt-owner', report?.currentEnsOwner);
+  put('owner-match', typeof report?.ownerMatch === 'boolean' ? report.ownerMatch ? 'MATCH' : 'MISMATCH' : '—');
+  put('verifier-reason', report?.verifierReason);
+  put('snapshot-block', report?.snapshotBlock);
+  put('controller-reason', report?.controllerReason ?? 'Requires matching controller confirmation.');
+  put('attempt-time', report ? `Last attempt ${report.completedAt ?? report.startedAt} · ${report.attemptId}${report.state === 'IN_PROGRESS' ? ' · Waiting; an interrupted bridge can leave this incomplete.' : ''}`
+    : 'No local attempt evidence. Policy does not confirm physical access.');
+}
+
+async function refreshEvidence() {
+  try { renderEvidence(await requestJson('/api/attempt')); }
+  catch { renderEvidence(null); }
+  try {
+    const report = await requestJson('/api/preflight');
+    document.getElementById('readiness-state').textContent = report?.result ?? 'NOT RUN';
+    document.getElementById('readiness-time').textContent = report ? `· Last check ${report.completedAt} · Phone checks remain manual.` : '';
+  } catch {
+    document.getElementById('readiness-state').textContent = 'NOT RUN';
+    document.getElementById('readiness-time').textContent = '';
+  }
+  setTimeout(refreshEvidence, 1500);
+}
+void refreshEvidence();

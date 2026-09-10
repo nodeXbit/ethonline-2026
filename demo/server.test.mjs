@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import test from 'node:test';
+import { newAttempt, completeAttempt } from './evidence.mjs';
 import {
   createDemoHandler, demoAuthority, demoOrigin, publicCredential, safePublicError,
 } from './server.mjs';
@@ -71,7 +72,7 @@ const transientRpcError = () => Object.assign(new Error('HTTP request failed.'),
 test('public credential serialization keeps chain integers as strings and excludes secrets', () => {
   const result = publicCredential(snapshot());
   assert.deepEqual(result, {
-    name: 'cred-001.demo-access.eth', status: 'REGISTERED', owner,
+    name: 'guest-001.demo-access.eth', status: 'REGISTERED', owner,
     registryExpiry: '1900000000', tokenId: '123456789012345678901234567890', resolver,
     access: { active: false, validUntil: '1800000000' }, authorization: 'DENY',
   });
@@ -363,4 +364,30 @@ test('security headers protect static and API responses and API is not cached', 
       if (path.startsWith('/api/')) assert.equal(response.headers.get('cache-control'), 'no-store');
     }
   });
+});
+
+test('credential API names guest; evidence endpoints whitelist metadata and never enable CORS', async () => {
+  const report = completeAttempt(newAttempt(), undefined);
+  await withServer(async port => {
+    assert.equal(JSON.parse((await request(port, '/api/credential')).text).name, 'guest-001.demo-access.eth');
+    const response = await request(port, '/api/attempt');
+    assert.deepEqual(JSON.parse(response.text), report);
+    assert.doesNotMatch(response.text, /SECRET|proof|signature|nonce|privateKey|rpcUrl/);
+    for (const path of ['/api/attempt', '/api/preflight', '/api/credential', '/']) {
+      const response = await request(port, path);
+      assert.equal(response.headers.get('access-control-allow-origin'), null);
+      if (path.startsWith('/api')) assert.equal(response.headers.get('cache-control'), 'no-store');
+    }
+    assert.equal((await request(port, '/api/attempt', { method: 'POST' })).status, 405);
+  }, { readAttempt: async () => ({ ...report, proof: 'SECRET', signature: 'SECRET', nonce: 'SECRET', rpcUrl: 'SECRET' }) });
+});
+
+test('partial, malformed or unreadable runtime evidence returns null, never stale success', async () => {
+  for (const readAttempt of [async () => ({ schemaVersion: 1 }), async () => '{partial', async () => { throw new Error('SECRET'); }]) {
+    await withServer(async port => {
+      const response = await request(port, '/api/attempt');
+      assert.equal(response.status, 200);
+      assert.equal(response.text, 'null');
+    }, { readAttempt });
+  }
 });

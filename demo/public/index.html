@@ -19,7 +19,7 @@
       <div class="card-glow" aria-hidden="true"></div>
       <div class="card-topline">
         <div>
-          <p class="micro-label">DEMO ACCESS</p>
+          <p class="micro-label">ENSv2 POLICY</p>
           <p class="card-type">DIGITAL KEY</p>
         </div>
         <span class="network-pill">SEPOLIA</span>
@@ -34,18 +34,20 @@
 
       <div class="state-line">
         <div>
-          <p class="micro-label">ACCESS STATE</p>
+          <p class="micro-label">POLICY STATE</p>
           <p class="access-state" id="access-state">LOADING</p>
         </div>
         <div class="authorization">
           <span class="status-dot" aria-hidden="true"></span>
-          <span id="authorization">CHECKING</span>
+          <span>POLICY <span id="authorization">CHECKING</span></span>
         </div>
       </div>
 
+      <p class="policy-clarification">Policy result only. Physical access requires controller confirmation.</p>
+
       <div class="identity">
         <p class="micro-label">CREDENTIAL</p>
-        <h2 id="credential-name">cred-001.demo-access.eth</h2>
+        <h2 id="credential-name">guest-001.demo-access.eth</h2>
         <div class="persistence-message">
           <span>Credential</span><strong id="credential-status">—</strong>
           <span class="divider" aria-hidden="true"></span>
@@ -77,6 +79,28 @@
       <button id="action-button" type="button" disabled>Loading credential…</button>
       <p class="feedback" id="feedback" role="status" aria-live="polite">Reading authoritative ENSv2 state…</p>
     </section>
+
+    <section class="evidence-grid" aria-label="Last Gate E attempt" aria-live="polite">
+      <article class="evidence-card">
+        <h2 class="micro-label">HOLDER VERIFIER</h2>
+        <p class="evidence-state" id="verifier-state">NOT RUN</p>
+        <dl class="evidence-details">
+          <div><dt>Recovered signer</dt><dd id="recovered-signer">—</dd></div>
+          <div><dt>Current ENS owner</dt><dd id="attempt-owner">—</dd></div>
+          <div><dt>Owner match</dt><dd id="owner-match">—</dd></div>
+          <div><dt>Reason</dt><dd id="verifier-reason">—</dd></div>
+          <div><dt>Snapshot block</dt><dd id="snapshot-block">—</dd></div>
+        </dl>
+      </article>
+      <article class="evidence-card" id="controller-card">
+        <h2 class="micro-label">PHYSICAL CONTROLLER</h2>
+        <p class="evidence-state" id="controller-state">NOT RUN</p>
+        <p class="feedback" id="controller-reason">Requires matching controller confirmation.</p>
+        <p class="micro-label replay-label">REPLAY: <span id="replay-state">NOT CHECKED</span></p>
+      </article>
+    </section>
+    <p class="feedback evidence-note" id="attempt-time">No local attempt evidence. Policy does not confirm physical access.</p>
+    <p class="feedback evidence-note">SYSTEM READINESS: <strong id="readiness-state">NOT RUN</strong> <span id="readiness-time"></span></p>
 
     <footer>
       <span class="live-mark"><span></span> Live ENSv2 reads</span>

@@ -3,7 +3,9 @@ import { createServer } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
-import { readCredential, credentialLabel, parentName } from '../scripts/ensv2/access-record.mjs';
+import { readCredential, parentName } from '../scripts/ensv2/access-record.mjs';
+import { demoConfig } from '../scripts/security/demo-config.mjs';
+import { attemptFile, preflightFile, readReport, sanitizeAttempt, sanitizePreflight } from './evidence.mjs';
 import { connect, requireCondition } from '../scripts/ensv2/contracts.mjs';
 import {
   accessStateAchieved, PendingAccessTransaction, publicErrorDetails,
@@ -21,6 +23,8 @@ const staticRoutes = new Map([
   ['/styles.css', { file: new URL('./public/styles.css', import.meta.url), type: 'text/css; charset=utf-8' }],
   ['/app.js', { file: new URL('./public/app.js', import.meta.url), type: 'text/javascript; charset=utf-8' }],
   ['/access-action.js', { file: new URL('./public/access-action.js', import.meta.url),
+    type: 'text/javascript; charset=utf-8' }],
+  ['/evidence-view.js', { file: new URL('./public/evidence-view.js', import.meta.url),
     type: 'text/javascript; charset=utf-8' }],
 ]);
 
@@ -67,7 +71,7 @@ export function safePublicError(error, {
 export function publicCredential(snapshot) {
   const numericStatus = Number(snapshot.state.status);
   return {
-    name: `${credentialLabel}.${parentName}`,
+    name: demoConfig.credential.name,
     status: statusNames[numericStatus] ?? `UNKNOWN(${numericStatus})`,
     owner: snapshot.owner,
     registryExpiry: snapshot.expiry.toString(),
@@ -99,12 +103,28 @@ function validateWriteRequest(request) {
 
 export function createDemoHandler({
   readState, writeAccess, loadStatic = readFile, preSubmissionRetryOptions = {},
+  readAttempt = () => readReport(attemptFile, sanitizeAttempt),
+  readPreflight = () => readReport(preflightFile, sanitizePreflight),
 }) {
   let writePending = false;
   let unresolvedWrite = null;
 
   return async function demoHandler(request, response) {
     const path = request.url;
+    if (path === '/api/attempt' || path === '/api/preflight') {
+      if (request.method !== 'GET') {
+        sendJson(response, 405, { error: { code: 'METHOD_NOT_ALLOWED',
+          message: 'Only GET is allowed for this route.', stage: 'routing' } });
+        return;
+      }
+      let report = null;
+      try {
+        report = path === '/api/attempt' ? sanitizeAttempt(await readAttempt())
+          : sanitizePreflight(await readPreflight());
+      } catch { /* Missing/malformed local evidence is never success. */ }
+      sendJson(response, 200, report);
+      return;
+    }
     const staticRoute = staticRoutes.get(path);
     if (staticRoute) {
       if (request.method !== 'GET') {
@@ -234,11 +254,13 @@ export function createDemoHandler({
   };
 }
 
-export function createProductionDependencies() {
+export function createProductionDependencies({
+  makeClient = createPublicClient, read = readCredential, connectWriter = connect, update = updateAccess,
+} = {}) {
   let publicClient;
   async function client() {
     if (!publicClient) {
-      const candidate = createPublicClient({ chain: sepolia,
+      const candidate = makeClient({ chain: sepolia,
         transport: http(process.env.SEPOLIA_RPC_URL?.trim() || undefined) });
       requireCondition(await candidate.getChainId() === sepolia.id,
         'RPC must be Sepolia (11155111).');
@@ -247,11 +269,12 @@ export function createProductionDependencies() {
     return publicClient;
   }
   return {
-    readState: async () => readCredential(await client()),
+    readState: async () => read(await client(), { label: demoConfig.credential.label }),
     writeAccess: async action => {
-      const context = await retryPreSubmissionRpc(connect, { stage: 'Sepolia connection' });
+      const context = await retryPreSubmissionRpc(connectWriter, { stage: 'Sepolia connection' });
       requireCondition(context.parent === parentName, 'This demo requires demo-access.eth.');
-      return updateAccess(context, action);
+      return update(context, action, { credentialLabel: demoConfig.credential.label,
+        credentialOwner: demoConfig.expectedOwner });
     },
   };
 }
