@@ -60,6 +60,23 @@ function targetCredential(context, options = {}) {
   return { ...identity, owner };
 }
 
+const maxUint64 = (1n << 64n) - 1n;
+
+export function nextInactiveRenewal(snapshot, validUntil) {
+  requireRegistered(snapshot);
+  requireCondition(snapshot.access !== null, 'access.v1 is not configured; inspect setup evidence.');
+  requireCondition(snapshot.access.active === false,
+    'Inactive renewal refuses an ACTIVE access record.');
+  requireCondition(typeof validUntil === 'bigint' && validUntil >= 0n && validUntil <= maxUint64,
+    'validUntil must be an explicit uint64 Unix timestamp.');
+  requireCondition(validUntil > snapshot.block.timestamp,
+    'Requested validUntil must be later than the pinned block timestamp.');
+  requireCondition(validUntil <= snapshot.expiry,
+    'Requested validUntil must not exceed the credential registry expiry.');
+  if (snapshot.access.validUntil >= validUntil) return snapshot.access;
+  return { active: false, validUntil };
+}
+
 let stage = 'configuration';
 const pendingMessage = 'DEV has unresolved pending transactions. Wait for their result before rerunning setup.';
 export class PendingSetupTransaction extends Error {
@@ -385,20 +402,20 @@ export async function setupCredential(context, options = {}) {
   }
 }
 
-export async function updateAccess(context, action, recoveryOptions = {}) {
-  requireCondition(action === 'activate' || action === 'deactivate',
-    'Access action must be activate or deactivate.');
+async function updateAccessRecord(context, {
+  target, requestedAccess, isAchieved, recoveryOptions,
+}) {
   stage = 'access update preflight';
-  const target = targetCredential(context, recoveryOptions);
   const preSubmissionRetryOptions = recoveryOptions.preSubmissionRetryOptions ?? {};
   const before = await retryPreSubmissionRpc(
     () => readCredential(context.publicClient, { includeParent: true, label: target.label }),
     { ...preSubmissionRetryOptions, stage: 'access update credential read' });
-  requireCondition(isAddressEqual(before.owner, target.owner),
-    'Credential is not held by the intended owner.');
-  if (accessStateAchieved(before, action)) {
+  const access = requestedAccess(before);
+  if (isAchieved(before, access)) {
     return {
       changed: false,
+      writeRequired: false,
+      preflight: Boolean(recoveryOptions.preflightOnly),
       recovered: false,
       pending: false,
       transactionState: accessTransactionState.beforeSubmission,
@@ -407,7 +424,6 @@ export async function updateAccess(context, action, recoveryOptions = {}) {
       credential: before,
     };
   }
-  const access = nextAccess(action, before.access, before.block.timestamp);
   stage = 'access update pending nonce guard';
   await requireNoPendingAccess(context.publicClient, context.account.address,
     preSubmissionRetryOptions, 'initial');
@@ -418,6 +434,20 @@ export async function updateAccess(context, action, recoveryOptions = {}) {
     }), { ...preSubmissionRetryOptions, stage: 'access update simulation' });
   await requireNoPendingAccess(context.publicClient, context.account.address,
     preSubmissionRetryOptions, 'post-simulation');
+  if (recoveryOptions.preflightOnly) {
+    return {
+      changed: false,
+      writeRequired: true,
+      preflight: true,
+      requestedAccess: access,
+      recovered: false,
+      pending: false,
+      transactionState: accessTransactionState.beforeSubmission,
+      transactionHash: null,
+      blockNumber: before.block.number,
+      credential: before,
+    };
+  }
   stage = 'access update submission';
   const transactionHash = await context.walletClient.writeContract(request);
   console.log({ operation: 'setData', transactionHash });
@@ -454,23 +484,76 @@ export async function updateAccess(context, action, recoveryOptions = {}) {
   };
 }
 
+export async function updateAccess(context, action, recoveryOptions = {}) {
+  requireCondition(action === 'activate' || action === 'deactivate',
+    'Access action must be activate or deactivate.');
+  const target = targetCredential(context, recoveryOptions);
+  return updateAccessRecord(context, {
+    target,
+    recoveryOptions,
+    requestedAccess: before => {
+      requireCondition(isAddressEqual(before.owner, target.owner),
+        'Credential is not held by the intended owner.');
+      return nextAccess(action, before.access, before.block.timestamp);
+    },
+    isAchieved: before => accessStateAchieved(before, action),
+  });
+}
+
+export async function renewInactiveAccess(context, validUntil, recoveryOptions = {}) {
+  requireCondition(Boolean(recoveryOptions.credentialLabel),
+    'Inactive renewal requires an explicit --credential-label.');
+  requireCondition(recoveryOptions.credentialOwner === undefined,
+    'Inactive renewal preserves the authoritative owner; do not pass --credential-owner.');
+  const target = credentialIdentity(recoveryOptions.credentialLabel);
+  return updateAccessRecord(context, {
+    target,
+    recoveryOptions,
+    requestedAccess: before => nextInactiveRenewal(before, validUntil),
+    isAchieved: (before, access) => before.access?.active === false &&
+      before.access.validUntil === access.validUntil,
+  });
+}
+
 export function parseCredentialOptions(args = []) {
   const options = {};
-  for (let index = 0; index < args.length; index += 2) {
+  for (let index = 0; index < args.length; index++) {
     const flag = args[index];
+    if (flag === '--preflight') {
+      options.preflightOnly = true;
+      continue;
+    }
     const value = args[index + 1];
     requireCondition(Boolean(value), `${flag ?? 'Option'} requires a value.`);
+    index++;
     if (flag === '--credential-label') options.credentialLabel = value;
     else if (flag === '--credential-owner') options.credentialOwner = value;
+    else if (flag === '--valid-until') {
+      requireCondition(/^\d+$/.test(value), '--valid-until must be uint64 Unix seconds.');
+      options.validUntil = BigInt(value);
+      requireCondition(options.validUntil <= maxUint64,
+        '--valid-until must be uint64 Unix seconds.');
+    }
     else throw new Error(`Unknown option: ${flag}`);
   }
   return options;
 }
 
 export async function main(action = process.argv[2], args = process.argv.slice(3)) {
-  requireCondition(['setup', 'activate', 'deactivate', 'inspect'].includes(action),
-    'Command must be setup, activate, deactivate or inspect.');
+  requireCondition(['setup', 'activate', 'deactivate', 'renew-inactive', 'inspect'].includes(action),
+    'Command must be setup, activate, deactivate, renew-inactive or inspect.');
   const credentialOptions = parseCredentialOptions(args);
+  if (action === 'renew-inactive') {
+    requireCondition(Boolean(credentialOptions.credentialLabel),
+      'Inactive renewal requires an explicit --credential-label.');
+    requireCondition(credentialOptions.validUntil !== undefined,
+      'Inactive renewal requires an explicit --valid-until.');
+    requireCondition(credentialOptions.credentialOwner === undefined,
+      'Inactive renewal preserves the authoritative owner; do not pass --credential-owner.');
+  } else {
+    requireCondition(credentialOptions.preflightOnly === undefined,
+      '--preflight is only supported for renew-inactive.');
+  }
   // No signing connection or prior resolver knowledge is needed for inspect.
   if (action === 'inspect') {
     const client = createPublicClient({ chain: sepolia,
@@ -487,6 +570,20 @@ export async function main(action = process.argv[2], args = process.argv.slice(3
     printSnapshot(ready);
     console.log('PERSISTENT CREDENTIAL: READY');
     console.log(`ACCESS STATE: ${ready.access.active ? 'ACTIVE' : 'INACTIVE'}`);
+    return;
+  }
+
+  if (action === 'renew-inactive') {
+    const result = await renewInactiveAccess(context, credentialOptions.validUntil, credentialOptions);
+    printSnapshot(result.credential);
+    if (credentialOptions.preflightOnly) {
+      console.log(`ACCESS RENEWAL PREFLIGHT: ${result.writeRequired ? 'WRITE REQUIRED' : 'NO-OP'}`);
+      if (result.writeRequired) {
+        console.log(`REQUESTED access.validUntil: ${result.requestedAccess.validUntil.toString()}`);
+      }
+      return;
+    }
+    console.log(`ACCESS RENEWAL: ${result.changed ? 'UPDATED' : 'NO-OP'}`);
     return;
   }
 

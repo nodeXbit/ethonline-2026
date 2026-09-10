@@ -13,6 +13,7 @@
     "ensv2:persistent:setup": "node --env-file=.env.local scripts/ensv2/persistent-access.mjs setup",
     "ensv2:access:activate": "node --env-file=.env.local scripts/ensv2/persistent-access.mjs activate",
     "ensv2:access:deactivate": "node --env-file=.env.local scripts/ensv2/persistent-access.mjs deactivate",
+    "ensv2:access:renew-inactive": "node --env-file=.env.local scripts/ensv2/persistent-access.mjs renew-inactive",
     "ensv2:persistent:inspect": "node --env-file=.env.nfc.local scripts/ensv2/persistent-access.mjs inspect",
     "ensv2:revoke": "node --env-file=.env.local scripts/ensv2/credential-state.mjs revoke"
   },

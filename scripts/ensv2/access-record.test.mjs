@@ -8,8 +8,9 @@ import {
 } from './access-record.mjs';
 import {
   accessTransactionState, isTransientRpcError, nextAccess, PendingAccessTransaction, publicErrorDetails,
-  PreSubmissionRpcError, requireSameCredential, registrationExpiry, RevertedAccessTransaction,
-  setupCredential, updateAccess,
+  nextInactiveRenewal, parseCredentialOptions, PreSubmissionRpcError, renewInactiveAccess,
+  requireSameCredential, registrationExpiry, RevertedAccessTransaction, setupCredential, updateAccess,
+  main as persistentAccessMain,
 } from './persistent-access.mjs';
 import { normalizeUid, parseDetectionLine } from '../nfc/bridge.mjs';
 
@@ -293,6 +294,117 @@ test('activation renews an active but expired access deadline exactly once', asy
   assert.equal(result.changed, true);
   assert.equal(result.credential.access.active, true);
   assert.ok(result.credential.access.validUntil > result.credential.block.timestamp);
+  assert.deepEqual(c.writes, ['setData']);
+});
+
+test('inactive renewal writes the requested deadline while preserving inactive state', async () => {
+  for (const current of [100n, 500n]) {
+    const c = chain({ ...registered, access: encodeAccess({ active: false, validUntil: current }) });
+    const result = await renewInactiveAccess(c.context, 900n, { credentialLabel: 'cred-001' });
+    assert.equal(result.changed, true);
+    assert.deepEqual(result.credential.access, { active: false, validUntil: 900n });
+    assert.equal(result.credential.authorized, false);
+    assert.deepEqual(c.writes, ['setData']);
+  }
+});
+
+test('inactive renewal is a semantic no-op when the current deadline is sufficient', async () => {
+  for (const requested of [900n, 899n]) {
+    const c = chain({ ...registered, access: encodeAccess({ active: false, validUntil: 900n }) });
+    const result = await renewInactiveAccess(c.context, requested, { credentialLabel: 'cred-001' });
+    assert.equal(result.changed, false);
+    assert.equal(result.transactionHash, null);
+    assert.deepEqual(c.writes, []);
+  }
+});
+
+test('inactive renewal refuses ACTIVE, malformed, unregistered, past and over-expiry inputs', async () => {
+  const cases = [
+    [{ ...registered, access: active }, 900n, /ACTIVE/],
+    [{ ...registered, access: '0xab' }, 900n, /Malformed/],
+    [{ status: AVAILABLE, deployed: true, access: inactive }, 900n, /REGISTERED/],
+    [{ ...registered, access: inactive }, 100n, /later than/],
+    [{ ...registered, expiry: 800n, access: inactive }, 900n, /registry expiry/],
+  ];
+  for (const [options, requested, expected] of cases) {
+    const c = chain(options);
+    await assert.rejects(
+      renewInactiveAccess(c.context, requested, { credentialLabel: 'cred-001' }), expected);
+    assert.deepEqual(c.writeAttempts, []);
+    assert.deepEqual(c.writes, []);
+  }
+});
+
+test('inactive renewal requires explicit scoped uint64 CLI inputs', async () => {
+  assert.throws(() => parseCredentialOptions(['--valid-until', '-1']), /uint64/);
+  assert.throws(() => parseCredentialOptions(['--valid-until', (1n << 64n).toString()]), /uint64/);
+  assert.deepEqual(parseCredentialOptions([
+    '--credential-label', 'guest-001', '--valid-until', '900', '--preflight',
+  ]), { credentialLabel: 'guest-001', validUntil: 900n, preflightOnly: true });
+  await assert.rejects(persistentAccessMain('renew-inactive', ['--valid-until', '900']),
+    /explicit --credential-label/);
+  await assert.rejects(persistentAccessMain('renew-inactive', ['--credential-label', 'guest-001']),
+    /explicit --valid-until/);
+  const c = chain({ ...registered, access: inactive });
+  await assert.rejects(renewInactiveAccess(c.context, 900n), /explicit --credential-label/);
+  await assert.rejects(renewInactiveAccess(c.context, 900n, {
+    credentialLabel: 'cred-001', credentialOwner: owner,
+  }), /preserves the authoritative owner/);
+  assert.deepEqual(c.writes, []);
+});
+
+test('inactive renewal targets only the requested credential node', async () => {
+  const guest = credentialIdentity('guest-001');
+  const c = chain({ ...registered, credentialNode: guest.node,
+    access: encodeAccess({ active: false, validUntil: 500n }) });
+  await renewInactiveAccess(c.context, 900n, { credentialLabel: guest.label });
+  const request = c.requests.find(item => item.functionName === 'setData');
+  assert.equal(request.args[0], guest.node);
+  assert.notEqual(request.args[0], credentialNode);
+  assert.deepEqual(decodeAccess(request.args[2]), { active: false, validUntil: 900n });
+  assert.deepEqual(c.writes, ['setData']);
+});
+
+test('inactive renewal preflight simulates exact write but never submits it', async () => {
+  const c = chain({ ...registered, access: encodeAccess({ active: false, validUntil: 500n }) });
+  const result = await renewInactiveAccess(c.context, 900n, {
+    credentialLabel: 'cred-001', preflightOnly: true,
+  });
+  assert.equal(result.preflight, true);
+  assert.equal(result.writeRequired, true);
+  assert.deepEqual(result.requestedAccess, { active: false, validUntil: 900n });
+  assert.equal(c.calls.filter(call => call === 'simulate:setData').length, 1);
+  assert.deepEqual(c.writeAttempts, []);
+  assert.deepEqual(c.writes, []);
+
+  const sufficient = chain({ ...registered,
+    access: encodeAccess({ active: false, validUntil: 900n }) });
+  const noOp = await renewInactiveAccess(sufficient.context, 900n, {
+    credentialLabel: 'cred-001', preflightOnly: true,
+  });
+  assert.equal(noOp.writeRequired, false);
+  assert.ok(!sufficient.calls.includes('simulate:setData'));
+  assert.deepEqual(sufficient.writes, []);
+});
+
+test('inactive renewal reuses access transaction recovery without resubmission', async () => {
+  const c = chain({ ...registered, access: inactive, waitReceiptFailures: 1 });
+  const result = await renewInactiveAccess(c.context, 95000n, {
+    credentialLabel: 'cred-001', recoveryDelays: [0], sleep: async () => {},
+  });
+  assert.equal(result.recovered, true);
+  assert.deepEqual(result.credential.access, { active: false, validUntil: 95000n });
+  assert.deepEqual(c.writeAttempts, ['setData']);
+  assert.deepEqual(c.writes, ['setData']);
+});
+
+test('inactive renewal cannot confirm a mismatched authoritative readback', async () => {
+  const c = chain({ ...registered, access: inactive, ignoreAccessWrite: true });
+  const result = await renewInactiveAccess(c.context, 95000n, {
+    credentialLabel: 'cred-001', recoveryDelays: [0], sleep: async () => {},
+  });
+  assert.equal(result.pending, true);
+  assert.equal(result.credential, undefined);
   assert.deepEqual(c.writes, ['setData']);
 });
 

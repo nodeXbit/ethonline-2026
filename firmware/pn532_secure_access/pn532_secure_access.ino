@@ -48,8 +48,8 @@ PN532 nfc(pn532Transport);
 }
 
 [[noreturn]] void stopAt(const char *stage, const char *reason) {
-  Serial0.println("AUTHORIZATION: DENY");
   Serial0.printf("GATE_E: STOP - %s: %s\n", stage, reason);
+  Serial0.println("AUTHORIZATION: DENY");
   halt();
 }
 
