@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ENSv2 Access Demo</string>
+    <string name="gate_b_placeholder">ENSv2 Access Demo\nGate B — Privy holder signing</string>
+</resources>
