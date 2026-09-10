@@ -2,9 +2,9 @@
 
 ## Current objective
 
-Gate B: prove a native Privy Android embedded EOA can sign the exact `ENSv2 Access` EIP-712 challenge and Node/viem recovers the same wallet address.
+Gate C: prove Android Host Card Emulation can transport the holder-proof challenge/signature protocol over ISO-DEP/APDUs without changing Gate A/B cryptographic semantics.
 
-Do not add Privy payment, World, ERC-4337, or another sponsor layer until this security boundary is either validated or explicitly stopped by the timebox.
+Keep Gate C Android/HCE-focused first. Do not modify PN532 firmware until the Android side has a deterministic APDU protocol and testable behavior.
 
 ## Done
 - ChatGPT Project configured
@@ -31,6 +31,9 @@ Do not add Privy payment, World, ERC-4337, or another sponsor layer until this s
 - A dedicated Sepolia RPC configured through the existing local environment improved demo reliability; no endpoint or key is stored in the repository.
 - Secure holder-proof Gate A: PASS. Node now issues server-owned EIP-712 challenges, verifies the recovered signer against the current ENSv2 credential owner, consumes a valid holder proof exactly once before evaluating the shared `isAuthorized` policy, and rejects replay even when access later changes from DENY to ALLOW.
 - Gate A validation passed 17 holder-proof tests and the complete 79-test repository suite.
+- Privy Android signing Gate B: PASS. Native email OTP authentication and embedded Ethereum EOA creation/reuse succeeded on a real Solana Seeker used strictly as a standard Android device.
+- Native `eth_signTypedData_v4` is empirically supported with `io.privy:privy-core:0.14.0`. The device signed the exact `ENSv2 Access` EIP-712 fixture, and Node/viem recovered the same public wallet address.
+- Gate B validation passed the complete 82-test repository suite and performed zero blockchain writes.
 
 ## Sponsor / architecture delta
 
@@ -51,16 +54,15 @@ Do not add Privy payment, World, ERC-4337, or another sponsor layer until this s
 
 ## Next
 
-1. Install the minimum native Android toolchain; it is currently missing from this machine.
-2. Execute Gate B with a strict stop-loss: authenticate through native Privy Android, create/use an embedded EVM EOA, sign the exact Gate A typed challenge, and recover the same address with Node/viem.
-3. Treat native Privy Android typed-data signing as empirically unverified until Gate B passes; do not infer it from the generic provider interface.
-4. Do not begin Android HCE/NFC transport until Gate B passes.
+1. Define a deterministic, bounded Gate C ISO-DEP/APDU protocol for transporting the existing holder-proof challenge and signature.
+2. Implement and test Android HCE behavior first without changing Gate A/B cryptographic semantics.
+3. Keep PN532 firmware unchanged until the Android HCE side has deterministic, testable behavior.
+4. Preserve the static NFC UID exclusion: it remains outside secure authorization.
 
 ## Blockers
 
-- Secure wallet/mobile proof of credential control over the physical NFC path is not yet validated.
-- The Android toolchain is not installed on this machine.
-- Native Privy Android support for the required EIP-712 typed-data request remains empirically unverified.
+- Transport of the proven wallet signature over the physical NFC/HCE path is not yet validated.
+- Gate B proves signing interoperability only; secure physical challenge transport and end-to-end physical authorization remain Gate C work.
 - World Selfie Check sandbox/access is an external dependency only if World is selected as a secondary sponsor.
 
 ## Risks
@@ -102,4 +104,15 @@ server-issued EIP-712 challenge
   -> ALLOW / DENY
 ```
 
-The full suite passes 79 tests. Android/Privy signing and NFC transport are not yet implemented, so secure possession/control over the physical path remains unproven.
+Gate B additionally proves native signing interoperability:
+
+```text
+Privy Android embedded EOA
+  -> exact ENSv2 Access EIP-712 signature
+  -> Node/viem recovery
+  -> recovered signer equals Privy wallet
+```
+
+The real-device test used `io.privy:privy-core:0.14.0` on a Solana Seeker as a generic Android device. Native `eth_signTypedData_v4` is empirically supported, the recovered signer matched public wallet `0x3419148731087b970d2059C53780163B452D5FF7`, the full suite passes 82 tests, and the test caused zero blockchain writes.
+
+Gate B proves signing interoperability only. It does not yet prove NFC/HCE transport, physical cryptographic access, ENS credential ownership by the Privy wallet, a payment flow, or Privy prize qualification.

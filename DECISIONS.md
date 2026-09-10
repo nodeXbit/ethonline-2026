@@ -346,3 +346,34 @@ Authentication and authorization remain separate: EIP-712 proves wallet control,
 ### Revisit when
 
 The verifier requires durable or distributed replay protection, or a later wallet type requires standard contract-wallet verification.
+
+---
+
+## D-011 — Privy Android embedded EOA is the first mobile signer
+
+**Status:** Accepted
+**Date:** 2026-09-10
+
+### Decision
+
+Use the native Privy Android embedded EOA as the first mobile holder-proof signer. The currently proven artifact is `io.privy:privy-core:0.14.0`, whose native provider empirically supports `eth_signTypedData_v4` in the tested real-device flow.
+
+The Gate A `ENSv2 Access` EIP-712 schema remains canonical; mobile implementations must conform to it, and HCE transport must not change its cryptographic semantics.
+
+### Why
+
+Real-device email OTP authentication, embedded EOA creation/reuse, exact typed-data signing, and independent Node/viem recovery succeeded with the recovered signer equal to the Privy public wallet.
+
+### Consequences
+
+- App Secret must never enter mobile/client code.
+- Real App ID and App Client ID remain ignored local configuration for the current spike.
+- The Solana Seeker is only a generic Android test device; Seed Vault and the Solana stack are outside the current architecture.
+- Wired ADB failure is not a reason to make ADB an application dependency. Gate C may use manual APK installation again if needed.
+- Gate C is Android/HCE-first. Define and test deterministic APDU behavior before changing PN532 firmware.
+- Static NFC UID remains excluded from secure authorization.
+- This decision proves signing interoperability, not NFC/HCE transport, ENS credential ownership by the Privy wallet, payment, or Privy prize qualification.
+
+### Revisit when
+
+A later wallet model requires ERC-1271/6492, or a proven product requirement changes the mobile signer.

@@ -85,3 +85,16 @@ No product code has been written yet.
 - Added no dependency, accessed no real private key, and performed no blockchain write.
 - Technical learning: authentication proof and authorization policy are separate. EIP-712 proves control of a wallet, while current ENSv2 ownership and `access.v1` remain authoritative for authorization.
 
+## 2026-09-10
+
+### Privy Android signing Gate B milestone
+
+- Established the native Android skeleton and toolchain with application ID `io.github.nodexbit.ethonline2026`, then configured the matching Privy mobile client locally.
+- Integrated `io.privy:privy-core:0.14.0` with ignored local App ID/App Client ID configuration; no App Secret entered mobile code or Git.
+- Completed real-device native email OTP login on a Solana Seeker used only as a generic Android test device, then created or reused embedded Ethereum EOA `0x3419148731087b970d2059C53780163B452D5FF7`.
+- Signed the exact Gate A-compatible `ENSv2 Access` EIP-712 test fixture through native `eth_signTypedData_v4`; Node/viem recovered the same public address.
+- Confirmed `eth_signTypedData_v4` real-device support and passed the complete 82-test suite with zero blockchain writes.
+- Used manual APK installation because wired ADB authorization on the Seeker never surfaced the RSA confirmation dialog. This was a workflow workaround, not an application security dependency.
+- An early public-signature transfer introduced Cyrillic Unicode characters. Structural validation rejected it before cryptographic recovery; a byte-preserving transfer then passed. Public signatures are not secrets, but their transport must preserve exact bytes.
+- Technical learning: SDK/API availability in source is insufficient evidence; signing support had to be exercised through the real provider on a physical device.
+
