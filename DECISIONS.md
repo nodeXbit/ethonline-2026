@@ -626,3 +626,35 @@ One controlled physical ACTIVE attempt transported a fresh 104-byte challenge an
 ### Revisit when
 
 New reproducible evidence requires a security or transport change, or a production controller/actuator replaces the current prototype boundary.
+
+---
+
+## D-020 — Close Batch B with separate policy, verifier and controller evidence
+
+**Status:** Accepted
+**Date:** 2026-09-10
+
+### Decision
+
+Use `guest-001.demo-access.eth` as the only canonical secure demo credential. Preserve generic `cred-001` reference behavior. The UI must separate ENSv2 POLICY, HOLDER VERIFIER and PHYSICAL CONTROLLER; verifier ALLOW never implies physical success without matching controller confirmation. Transport failures and replay results remain distinct from policy decisions.
+
+Runtime evidence is local, advisory and non-authoritative. Atomically replaced, ignored JSON reports expose only sanitized metadata, never proof/signature bytes, challenge nonces, typed data, secrets or RPC URLs. New attempts replace old success with IN_PROGRESS. Reporting failures do not change authorization.
+
+Keep the loopback-only server as the local security boundary, preserving exact mutation Host/Origin checks, server-side signing, existing safe transaction paths and no CORS. Keep vanilla HTML/CSS/JS and local files: no database, event bus, new service or framework migration.
+
+Full cold boot remains the pre-session operational rule in `DEMO_RUNBOOK.md`. Passive boot observation cannot certify a phone session or replace missing hardware evidence; those checks remain explicit and manual where necessary.
+
+### Why
+
+The demo must make an onchain permission visibly different from proof of holder control and physical controller confirmation. The final browser review passed at 1366x900 normal zoom with all three cards visible together and no physical success implied by ACTIVE/POLICY ALLOW.
+
+### Consequences
+
+- BATCH B — DEMO RELIABILITY: PASS. Existing Gate E security and APDU v1 remain unchanged.
+- LIVE DEMO REHEARSAL is next; it has not yet been executed with the finalized Batch B UX.
+- No new dependencies, public deployment or speculative infrastructure are needed for this checkpoint.
+- Batch B is closed unless rehearsal discovers a real blocker.
+
+### Revisit when
+
+A concrete rehearsal regression or security issue requires a scoped correction. Do not reopen visual polish or protocol design without such evidence.

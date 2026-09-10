@@ -2,7 +2,22 @@
 
 ## Current objective
 
-BATCH B — DEMO RELIABILITY: create a sub-two-minute deterministic pre-demo health check, align the demo with `guest-001`, distinguish POLICY / VERIFIER / CONTROLLER outcomes, preserve proof redaction, maintain the full-cold-boot runbook, and rehearse controlled repeatability/revocation.
+LIVE DEMO REHEARSAL: execute the controlled plan in `DEMO_RUNBOOK.md` only in the next authorized session. No physical rehearsal has yet been executed with the finalized Batch B UX.
+
+## Batch B checkpoint
+
+BATCH B — DEMO RELIABILITY: PASS.
+
+- Canonical secure demo configuration: `guest-001.demo-access.eth`; generic historical `cred-001` behavior remains intact.
+- Operator commands: `npm run demo`, read-only `npm run demo:preflight`, optional `npm run demo:preflight -- --observe-boot`, `npm run demo:bridge`, and `npm run demo:bridge -- --check-replay`.
+- Preflight checks local configuration, CH343 availability and passive boot readiness, primary RPC/chain/freshness, expected credential owner/resolver, registry/access validity with a 24-hour access margin, and DEV latest/pending counts. Phone/session checks remain manual; absent boot output requires a manual cold boot rather than fabricated readiness.
+- Sanitized last-attempt evidence and SYSTEM READINESS are local, ignored, advisory reports. A new attempt starts IN_PROGRESS; verifier ALLOW alone never confirms physical access.
+- The local UI separates ENSv2 POLICY, HOLDER VERIFIER, and PHYSICAL CONTROLLER, with replay and readiness secondary. Final user-supplied ChatGPT Work browser review: PASS at 1366x900, normal zoom, all three primary cards visible together, no transaction button clicked and no proof/signature bytes shown.
+- Dedicated operational cold-boot, STOP/recovery and rehearsal instructions: `DEMO_RUNBOOK.md`.
+- Gate E security logic and Batch A bounds remain unchanged; APDU v1, firmware, Android, existing ENS policy and safe transaction paths are preserved. Server remains loopback-only with exact mutation Host/Origin checks and no CORS.
+- Implementation commit: `8a1b4bd52b25e988a4d39e630d1839860d78808c`. Final validation: Node 163/163 and targeted demo tests 52/52 PASS; `git diff --check` PASS. Prior Batch B Android 21/21 and `assembleDebug` PASS remain valid because Android is unchanged. Firmware is unchanged from the physically validated Gate E checkpoint.
+- Batch B implementation/review performed zero blockchain writes, NFC attempts or firmware flashes. The last authoritative read-only Batch B observation was guest ACTIVE/ALLOW with `validUntil=1793487599`; it was not re-queried or mutated during this checkpoint.
+- Batch B is closed unless live rehearsal discovers a real blocker.
 
 ## Done
 - ChatGPT Project configured
@@ -81,9 +96,9 @@ BATCH B — DEMO RELIABILITY: create a sub-two-minute deterministic pre-demo hea
 
 ## Next
 
-1. Build a sub-two-minute deterministic pre-demo health check.
-2. Align the demo with canonical secure credential `guest-001` and clearly distinguish POLICY / VERIFIER / CONTROLLER results while preserving proof redaction.
-3. Maintain the operational cold-boot runbook and rehearse controlled repeatability/revocation without expanding the secure protocol.
+1. LIVE DEMO REHEARSAL: follow the cold-boot/preflight and controlled INACTIVE/DENY → activation/readback → fresh ALLOW/controller confirmation → consumed-proof replay DENY plan in `DEMO_RUNBOOK.md`.
+2. Record actual rehearsal evidence and stop on a concrete blocker; do not expand the secure protocol or reopen UI polish speculatively.
+3. Rehearsal remains unexecuted by this checkpoint; README, public deployment and submission work remain separate.
 
 ## Blockers
 
@@ -104,7 +119,9 @@ BATCH B — DEMO RELIABILITY: create a sub-two-minute deterministic pre-demo hea
 
 ## Latest validation
 
-The current verified product slice remains:
+The latest Batch B validation is recorded above. The following records earlier physical and gate validation evidence; its test totals belong to those historical checkpoints.
+
+The earlier persistent-access slice demonstrated:
 
 ```text
 persistent ENSv2 credential

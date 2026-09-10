@@ -24,7 +24,9 @@
 
 ## Security upgrade direction
 
-The fresh cryptographic holder-proof architecture and physical Gate E INACTIVE/DENY and ACTIVE/ALLOW paths are verified. `guest-001.demo-access.eth` is the canonical secure demo credential, with validity renewed through 2026-10-31 23:59:59 Europe/Madrid and current ACTIVE/ALLOW policy. Deterministic Gate E timing, serial, coherent-snapshot, replay, and controller-confirmation bounds remain required. The immediate objective is Batch B — Demo Reliability.
+The fresh cryptographic holder-proof architecture and physical Gate E INACTIVE/DENY and ACTIVE/ALLOW paths are verified. `guest-001.demo-access.eth` is the canonical secure demo credential, with validity renewed through 2026-10-31 23:59:59 Europe/Madrid and last observed ACTIVE/ALLOW policy. Deterministic Gate E timing, serial, coherent-snapshot, replay, and controller-confirmation bounds remain required. Batch B — Demo Reliability is complete; the immediate objective is LIVE DEMO REHEARSAL with the finalized UX, which has not yet been physically rehearsed.
+
+The local demo now provides read-only preflight and boot observation, automatic CH343 discovery, sanitized advisory attempt evidence, and distinct ENSv2 POLICY / HOLDER VERIFIER / PHYSICAL CONTROLLER displays. Policy ALLOW never implies confirmed physical access. The loopback-only server and existing transaction safeguards remain the security boundary; `DEMO_RUNBOOK.md` defines cold boot and controlled recovery. Final desktop visual validation passed at 1366x900 normal zoom.
 
 Implemented local composition:
 
@@ -45,7 +47,7 @@ High-value layers already identified, but not yet implemented:
 
 - Further Privy onboarding/product UX beyond the implemented embedded-wallet signer.
 - Real USDC credential-issuance payment flow.
-- Sub-two-minute deterministic pre-demo health checking and controlled Gate E repeatability/revocation rehearsal.
+- Controlled Gate E repeatability/revocation rehearsal using the completed pre-demo health check and finalized local UI.
 - Dynamic credential branding/metadata.
 - Credential transferability.
 - World Selfie Check before issuance/activation.

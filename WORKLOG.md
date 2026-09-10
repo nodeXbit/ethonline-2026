@@ -187,3 +187,15 @@ No product code has been written yet.
 - The physical ACTIVE run itself performed zero blockchain writes. DEV nonce remained 22/22 with no pending transaction; `guest-001` remained ACTIVE/ALLOW and `cred-001` identity remained intact.
 - Technical lessons: physical authorization is not proven until controller confirmation; ACTIVE policy alone is not holder possession; NFC transports proof while Node performs blockchain authorization; whole-snapshot freshness and attempt deadlines reject stale or late ALLOW; full cold boot is currently an operational reliability measure, not a proven fix for intermittent PN532/I2C/ISO-DEP failures.
 
+### Batch B — demo reliability final checkpoint
+
+- Reviewed all 16 implementation files and found no P0/P1 regression requiring a fix. Implementation commit: `8a1b4bd52b25e988a4d39e630d1839860d78808c` (`feat: add deterministic demo reliability workflow`).
+- Added canonical guest-001 configuration, read-only preflight with optional passive boot observation, CH343-discovering demo bridge/replay commands, sanitized advisory runtime reports, and `DEMO_RUNBOOK.md`.
+- Aligned demo activate/deactivate with guest through the existing safe ENS transaction paths. Preserved generic cred-001 defaults, Gate A/ENS authorization, Batch A deadlines/freshness, exact controller confirmation, APDU v1, firmware and Android.
+- Separated ENSv2 POLICY, HOLDER VERIFIER and PHYSICAL CONTROLLER in the UI, with replay and SYSTEM READINESS. A small HTML/CSS refinement keeps the three primary cards together on desktop and places policy-only clarification beside ACTIVE/POLICY ALLOW.
+- Final validation from the resulting implementation tree: `node --test --test-isolation=none` passed 163/163; targeted demo/server/reliability tests passed 52/52; `git diff --check` passed. Previous Batch B Android 21/21 and `assembleDebug` PASS were retained without rebuilding unchanged sources. Firmware remains unchanged from the validated Gate E checkpoint.
+- Final user-supplied ChatGPT Work browser validation: PASS at 1366x900 normal zoom. Guest name and all three cards were readable together; controller stayed NOT RUN without evidence, recovered signer showed an em dash, and no proof/signature bytes were visible. No button was clicked and browser review modified no files/data.
+- Security review confirmed ignored runtime paths, no runtime files or local configuration staged, no real proof/signature or secrets added, and no fabricated physical-success evidence. Staged implementation content matched the reviewed tree exactly.
+- Batch B implementation/review used zero blockchain writes, zero NFC attempts and zero firmware flashes; no dependency installation or public deployment. The earlier authoritative read-only Batch B API observation was guest ACTIVE/ALLOW through `1793487599`; checkpoint review did not query or mutate onchain state.
+- BATCH B — DEMO RELIABILITY: PASS. Next objective: LIVE DEMO REHEARSAL. No physical rehearsal has yet been executed with the finalized Batch B UX; Batch B stays closed unless rehearsal reveals a real blocker.
+
