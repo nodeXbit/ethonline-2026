@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<host-apdu-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/gate_c1_hce_service"
+    android:requireDeviceUnlock="false">
+    <aid-group
+        android:category="other"
+        android:description="@string/gate_c1_hce_service">
+        <!--
+        F0 is in the proprietary AID range. The remaining bytes spell ENSV2C1,
+        making this a stable demo identifier without claiming a registered RID.
+        -->
+        <aid-filter android:name="F0454E5356324331" />
+    </aid-group>
+</host-apdu-service>

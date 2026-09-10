@@ -49,4 +49,5 @@ android {
 
 dependencies {
     implementation("io.privy:privy-core:0.14.0")
+    testImplementation("junit:junit:4.13.2")
 }
