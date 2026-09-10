@@ -1,10 +1,8 @@
 package io.github.nodexbit.ethonline2026
 
-import android.content.Context
+import io.github.nodexbit.ethonline2026.hce.AccessChallengeTypedData
+import io.github.nodexbit.ethonline2026.hce.GateC2TestVector
 
 object GateBTestVector {
-    const val ASSET_NAME = "gate-b-typed-data.json"
-
-    fun readJson(context: Context): String =
-        context.assets.open(ASSET_NAME).bufferedReader().use { it.readText() }
+    fun json(): String = AccessChallengeTypedData.json(GateC2TestVector.challenge())
 }

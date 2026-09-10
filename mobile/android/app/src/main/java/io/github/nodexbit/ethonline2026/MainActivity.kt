@@ -14,6 +14,8 @@ import android.widget.TextView
 import io.privy.auth.PrivyUser
 import io.privy.wallet.ethereum.EmbeddedEthereumWallet
 import io.privy.wallet.ethereum.EthereumRpcRequest
+import io.github.nodexbit.ethonline2026.hce.GateC2ManualHarness
+import io.github.nodexbit.ethonline2026.hce.PrivyProofProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +27,8 @@ class MainActivity : Activity() {
     private lateinit var emailInput: EditText
     private lateinit var otpInput: EditText
     private lateinit var walletText: TextView
+    private lateinit var hceSignerText: TextView
+    private lateinit var hceResultText: TextView
     private lateinit var signatureText: TextView
     private lateinit var statusText: TextView
     private lateinit var operationButtons: List<Button>
@@ -54,6 +58,7 @@ class MainActivity : Activity() {
         activityScope.launch {
             currentUser = gateBApplication.privy.getUser()
             if (currentUser == null) {
+                showHceSignerStatus("LOGIN REQUIRED")
                 showStatus("Ready for email login.")
             } else {
                 showStatus("Existing authenticated session restored.")
@@ -115,9 +120,15 @@ class MainActivity : Activity() {
             isEnabled = false
         }
         content.addView(copyWalletButton, matchWrapParams())
+        hceSignerText = label("HCE SIGNER:\nLOGIN REQUIRED")
+        content.addView(hceSignerText, matchWrapParams())
 
         val signButton = button("Sign Gate B challenge", ::signGateBChallenge)
         content.addView(signButton, matchWrapParams())
+        val hceTestButton = button("Run Gate C2 HCE signing test", ::runGateC2HceTest)
+        content.addView(hceTestButton, matchWrapParams())
+        hceResultText = label("GATE C2 HCE TEST:\nNot run")
+        content.addView(hceResultText, matchWrapParams())
         signatureText = label("SIGNATURE:\nNot available").apply {
             setTextIsSelectable(true)
         }
@@ -129,7 +140,13 @@ class MainActivity : Activity() {
 
         statusText = label("Initializing…")
         content.addView(statusText, matchWrapParams())
-        operationButtons = listOf(sendCodeButton, loginButton, walletButton, signButton)
+        operationButtons = listOf(
+            sendCodeButton,
+            loginButton,
+            walletButton,
+            signButton,
+            hceTestButton,
+        )
 
         return ScrollView(this).apply { addView(content) }
     }
@@ -194,7 +211,11 @@ class MainActivity : Activity() {
     }
 
     private fun reuseExistingWallet() {
-        val existing = currentUser?.embeddedEthereumWallets?.firstOrNull() ?: return
+        val existing = currentUser?.embeddedEthereumWallets?.firstOrNull()
+        if (existing == null) {
+            showHceSignerStatus("CREATE WALLET FIRST")
+            return
+        }
         selectWallet(existing, "Existing embedded Ethereum wallet reused.")
     }
 
@@ -202,6 +223,7 @@ class MainActivity : Activity() {
         ethereumWallet = wallet
         walletText.text = "PRIVY WALLET:\n${wallet.address}"
         copyWalletButton.isEnabled = true
+        showHceSignerStatus("READY")
         clearSignature()
         showStatus(status)
     }
@@ -213,13 +235,13 @@ class MainActivity : Activity() {
 
     private fun copySignature() {
         val signature = gateBSignature ?: return
-        copyPublicProof("Gate B EIP-712 signature", signature)
+        copyPublicProof("EIP-712 signature", signature)
     }
 
     private fun copyPublicProof(label: String, value: String) {
         val clipboard = getSystemService(ClipboardManager::class.java)
         clipboard.setPrimaryClip(ClipData.newPlainText(label, value))
-        showStatus("$label copied. This is public Gate B proof data.")
+        showStatus("$label copied. This is public proof data.")
     }
 
     private fun signGateBChallenge() {
@@ -231,7 +253,7 @@ class MainActivity : Activity() {
             }
             val request = EthereumRpcRequest.ethSignTypedDataV4(
                 address = wallet.address,
-                typedDataJson = GateBTestVector.readJson(this@MainActivity),
+                typedDataJson = GateBTestVector.json(),
             )
             wallet.provider.request(request).fold(
                 onSuccess = { response ->
@@ -254,6 +276,40 @@ class MainActivity : Activity() {
                     )
                 },
             )
+        }
+    }
+
+    private fun runGateC2HceTest() {
+        val wallet = ethereumWallet
+        if (wallet == null) {
+            showHceSignerStatus(if (currentUser == null) "LOGIN REQUIRED" else "CREATE WALLET FIRST")
+            showStatus("Authenticate and create or reuse the embedded Ethereum wallet first.")
+            return
+        }
+        hceResultText.text = "GATE C2 HCE TEST:\nPROCESSING"
+        runAction("Running SELECT → SEND_CHALLENGE → GET_STATUS through HCE processor…") {
+            try {
+                val result = GateC2ManualHarness.run(gateBApplication.hceProcessor)
+                val signature = PrivyProofProvider.encodeSignature(result.signature)
+                gateBSignature = signature
+                signatureText.text = "SIGNATURE:\n$signature"
+                copySignatureButton.isEnabled = true
+                hceResultText.text =
+                    "HCE SIGNER:\nREADY\n" +
+                    "HCE STATE:\n${result.state}\n" +
+                    "HCE SIGNATURE LENGTH:\n${result.signature.size}\n" +
+                    "RESULT:\nPASS"
+                showStatus(
+                    "Gate C2 HCE path produced a real eth_signTypedData_v4 signature " +
+                        "for ${wallet.address}.",
+                )
+            } catch (error: Throwable) {
+                clearSignature()
+                hceResultText.text =
+                    "HCE STATE:\n${gateBApplication.hceProcessor.currentState()}\n" +
+                    "RESULT:\nFAIL (${safeErrorClass(error)})"
+                showSafeFailure("Gate C2 HCE signing test", error)
+            }
         }
     }
 
@@ -281,6 +337,10 @@ class MainActivity : Activity() {
         gateBSignature = null
         signatureText.text = "SIGNATURE:\nNot available"
         copySignatureButton.isEnabled = false
+    }
+
+    private fun showHceSignerStatus(status: String) {
+        hceSignerText.text = "HCE SIGNER:\n$status"
     }
 
     private fun showSafeFailure(operation: String, error: Throwable) {

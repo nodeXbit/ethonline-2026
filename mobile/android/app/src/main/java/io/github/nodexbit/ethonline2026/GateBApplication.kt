@@ -4,13 +4,26 @@ import android.app.Application
 import io.privy.logging.PrivyLogLevel
 import io.privy.sdk.Privy
 import io.privy.sdk.PrivyConfig
+import io.github.nodexbit.ethonline2026.hce.CoroutineAsyncRunner
+import io.github.nodexbit.ethonline2026.hce.HceApduProcessor
+import io.github.nodexbit.ethonline2026.hce.PrivyProofProvider
+import io.github.nodexbit.ethonline2026.hce.PrivyTypedDataSignerSource
+import io.github.nodexbit.ethonline2026.hce.TypedDataSignerSource
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 class GateBApplication : Application() {
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     val isPrivyConfigured: Boolean
         get() = BuildConfig.PRIVY_APP_ID.isNotBlank() &&
             BuildConfig.PRIVY_APP_CLIENT_ID.isNotBlank()
 
     lateinit var privy: Privy
+        private set
+
+    lateinit var hceProcessor: HceApduProcessor
         private set
 
     override fun onCreate() {
@@ -26,5 +39,13 @@ class GateBApplication : Application() {
                 ),
             )
         }
+        val signerSource = if (isPrivyConfigured) {
+            PrivyTypedDataSignerSource(privy)
+        } else {
+            TypedDataSignerSource { null }
+        }
+        hceProcessor = HceApduProcessor(
+            PrivyProofProvider(CoroutineAsyncRunner(applicationScope), signerSource),
+        )
     }
 }
