@@ -490,3 +490,40 @@ One earlier GET_SIGNATURE failure was transient and not reproduced. A speculativ
 ### Revisit when
 
 A reproducible physical transport limitation produces specific evidence that the current contract cannot be carried safely.
+
+---
+
+## D-016 — Gate E composes holder proof and current ENS authorization without changing transport semantics
+
+**Status:** Accepted
+**Date:** 2026-09-10
+
+### Decision
+
+Use a separate credential for Gate E live validation: `guest-001.demo-access.eth`, planned owner `0x3419148731087b970d2059C53780163B452D5FF7`. Keep `cred-001.demo-access.eth` unchanged as the prior validated demo/reference credential.
+
+Use `demo-access.eth:door-001` as the physical resource identifier and derive its bytes32 value deterministically with `keccak256`.
+
+Node remains the challenge issuer, in-memory challenge store, Gate A verifier, and current ENS reader. The ESP32 remains NFC/APDU plus line-oriented serial transport only. It has no ENS, RPC, wallet, key, or UID authorization responsibility.
+
+Issue the Gate A challenge only after ordered `TARGET_ACTIVATION: PASS`, `SELECT: PASS`, and `WAITING_CHALLENGE` messages. Gate A remains the source of truth for challenge issuance, signature recovery, consumption, and replay semantics. Existing `readCredential` remains the coherent current ENS snapshot, and existing `isAuthorized` remains the only ENS access policy.
+
+Gate E firmware is one-shot per reset/session. Replay validation submits the exact consumed proof to the same Node store without new NFC work or a new challenge. No Android production or APDU v1 change is required.
+
+### Why
+
+Authentication, transport, and authorization stay separate: NFC transports the proof, Gate A proves current wallet control, and ENSv2 determines current credential ownership and access. Delaying issuance preserves the short challenge TTL, while one-shot consumption prevents later activation from making a captured denied proof valid.
+
+### Consequences
+
+- NFC UID has no role in secure authorization.
+- A valid current-holder proof is consumed before the later ENS policy result, including INACTIVE/DENY.
+- Wrong signer, malformed proof, timeout, and ENS read failure fail closed.
+- Credential label/owner parameters default to `cred-001` and the DEV account when omitted, preserving the established flow.
+- Provisioning `guest-001` does not transfer, unregister, or modify `cred-001`.
+- Live provisioning requires separate explicit authorization after this code checkpoint.
+- Local implementation success must not be described as live secure ENS authorization success.
+
+### Revisit when
+
+Only if live physical validation exposes a concrete transport or coherent-read defect that cannot be addressed within the frozen APDU v1 and Gate A semantics.

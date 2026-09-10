@@ -4,13 +4,13 @@
 - Problem: owners and operators of physical spaces need a simple way to grant temporary access with authoritative credential state that is open, inspectable, and easy to update.
 - Initial user: the owner or operator of a physical space granting temporary access.
 - Product direction: an open physical-access credential prototype in which ENSv2 on Sepolia is the authoritative state and an ESP32-S3 with a PN532 bridges that state to a physical NFC interaction.
-- Core flow: an operator activates or deactivates access in the browser; the local Node server updates PermissionedResolver `access.v1` on Sepolia; a user presents the NFC identifier; the separate bridge reads the same authoritative ENSv2 state and produces an access decision.
+- Core flow: an operator activates or deactivates access in the browser; the local Node server updates PermissionedResolver `access.v1` on Sepolia; a user presents a fresh wallet-signed proof through Android HCE and the ESP32/PN532; the secure bridge verifies current holder control and reads the same authoritative ENSv2 state to produce an access decision.
 - Primary sponsor: ENS / ENSv2.
 - MVP: one end-to-end Sepolia vertical slice demonstrating ENSv2-authoritative credential state and a physical ISO14443A NFC interaction through the ESP32-S3 and PN532.
-- Verified architecture: browser demo -> local Node server -> ENSv2 PermissionedResolver `access.v1` -> persistent UserRegistry credential. The separate physical NFC bridge reads the same authoritative ENSv2 state. Access can be activated or revoked without unregistering or burning the credential.
+- Verified local architecture: browser demo -> local Node server -> ENSv2 PermissionedResolver `access.v1` -> persistent UserRegistry credential; and fresh Node challenge -> ESP32/PN532 -> Android HCE/Privy proof -> Node Gate A verification -> coherent current ENSv2 read. Live Gate E authorization remains pending.
 - Verified lifecycle: the same NFC tag produced `DENY → ALLOW → DENY` while the credential remained REGISTERED with unchanged owner, tokenId, resolver, and registry expiry.
 - Future layers: presentation/collectible behavior, dynamic metadata, loyalty, transferability, and programmable benefits may build on the persistent credential, but none is implemented yet.
-- Non-goals: production-grade access control, complex infrastructure, multiple superficial sponsor integrations, cryptographic NFC challenge-response, Android HCE, and unrelated Hermes/Knowledge OS work.
+- Non-goals: production-grade access control, complex infrastructure, multiple superficial sponsor integrations, and unrelated Hermes/Knowledge OS work.
 - NFC security boundary: a static NFC UID is acceptable only as a prototype/demo identifier. It is clonable and must not be represented as secure proof of credential ownership or as anti-cloning security.
 
 ## Sponsor strategy
@@ -24,9 +24,9 @@
 
 ## Security upgrade direction
 
-The highest-value next product improvement is to replace trust in a static NFC UID with a fresh cryptographic holder proof.
+The fresh cryptographic holder-proof architecture is implemented locally; live provisioning and physical Gate E validation are the next security objective.
 
-Preferred first implementation:
+Implemented local composition:
 
 ```text
 door/verifier creates fresh challenge
@@ -43,9 +43,9 @@ Start with a simple embedded EOA signer before making an ERC-4337 smart wallet t
 
 High-value layers already identified, but not yet implemented:
 
-- Privy embedded wallet / passkey onboarding.
+- Further Privy onboarding/product UX beyond the implemented embedded-wallet signer.
 - Real USDC credential-issuance payment flow.
-- Android HCE/mobile NFC presentation.
+- Live validation of the implemented Android HCE/mobile NFC secure presentation.
 - Dynamic credential branding/metadata.
 - Credential transferability.
 - World Selfie Check before issuance/activation.

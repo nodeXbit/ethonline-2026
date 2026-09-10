@@ -2,9 +2,7 @@
 
 ## Current objective
 
-Gate E: replace the deterministic Gate D transport vector with a fresh server-issued Gate A challenge and compose the physically transported holder proof with current ENSv2 ownership and `access.v1` authorization to produce physical `ALLOW` / `DENY`.
-
-Gate E must keep NFC UID outside secure authorization and preserve the frozen APDU v1 contract.
+Perform a read-only Gate E live preflight, then provision the separate Privy-owned credential in an INACTIVE state through explicitly authorized Sepolia writes. After provisioning, validate physical `DENY -> ALLOW -> replay DENY -> DENY` without using NFC UID as an authorization factor.
 
 ## Done
 - ChatGPT Project configured
@@ -47,6 +45,11 @@ Gate E must keep NFC UID outside secure authorization and preserve the frozen AP
 - Gate D passed 2/2 complete physical sessions. The earlier GET_SIGNATURE failure is classified as transient/not reproduced after the unchanged implementation transported the full 67-byte response twice.
 - Gate D requires no chunking. Final validation passed Node 83/83, Android 21/21, Android debug assembly, and firmware compilation.
 - Gate D proves physical cryptographic proof transport. It does not yet prove ENS-based physical authorization.
+- Gate E secure authorization implementation: PASS locally / LIVE VALIDATION PENDING. The Node bridge issues a fresh Gate A challenge only after target activation, AID SELECT, and `WAITING_CHALLENGE`; transports the exact 104-byte challenge to the ESP32; expects an exact 65-byte physical proof; and reuses the existing Gate A verifier, current ENS owner comparison, coherent `readCredential` snapshot, and `isAuthorized` policy.
+- Gate E replay-check support re-verifies the exact proof through the same in-memory challenge store and produces `REPLAYED_CHALLENGE` without another NFC operation, challenge, or blockchain write.
+- The separate Gate E firmware is fail-closed and one-shot. Credential label/owner parameters support a second credential without changing the existing `cred-001` defaults.
+- Gate E local validation passed Node 99/99, Android 21/21 plus debug assembly, and compilation of both Gate D and Gate E firmware. Android production code and APDU v1 remain unchanged.
+- No live Gate E credential has yet been provisioned. The planned secure credential is `guest-001.demo-access.eth`, intended owner `0x3419148731087b970d2059C53780163B452D5FF7`.
 
 ## Sponsor / architecture delta
 
@@ -67,14 +70,14 @@ Gate E must keep NFC UID outside secure authorization and preserve the frozen AP
 
 ## Next
 
-1. Implement Gate E with a fresh verifier-issued Gate A challenge.
-2. Transport the resulting holder proof through the proven Gate D PN532/HCE path.
-3. Evaluate current ENSv2 ownership and `access.v1` to produce physical `ALLOW` / `DENY`.
-4. Keep static NFC UID outside secure authorization and preserve APDU v1.
+1. Perform a read-only Gate E live preflight.
+2. With separate explicit authorization, provision `guest-001.demo-access.eth` for the intended Privy owner with INACTIVE access.
+3. Validate INACTIVE physical DENY, ACTIVE physical ALLOW, same-proof replay DENY, then INACTIVE physical DENY.
+4. Keep `cred-001`, NFC UID exclusion, and APDU v1 unchanged.
 
 ## Blockers
 
-- Physical proof transport is complete; composition with a fresh Gate A challenge and current ENSv2 authorization remains unimplemented.
+- Gate E code composition is complete locally; live credential provisioning and physical authorization validation remain pending explicit authorization.
 - World Selfie Check sandbox/access is an external dependency only if World is selected as a secondary sponsor.
 
 ## Risks

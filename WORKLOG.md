@@ -136,3 +136,17 @@ No product code has been written yet.
 - Final validation passed firmware compilation, Android 21/21 JVM tests and debug assembly, and Node 83/83.
 - Technical learning: do not redesign a protocol around one transient hardware failure. Instrument the failing boundary first; successful full-size reproduction proved the transport itself was viable.
 
+### Gate E secure authorization implementation checkpoint
+
+- Implemented the Gate E secure serial bridge: Node waits for physical target activation, successful AID SELECT, and `WAITING_CHALLENGE` before issuing a fresh Gate A challenge.
+- Node sends the canonical 104-byte `credential[32] || resource[32] || nonce[32] || expiresAt[8 big-endian]` challenge to the firmware; the firmware returns an exact 65-byte proof to Node.
+- One `IssuedChallengeStore` remains alive in the same Node process from issuance through existing Gate A verification and optional replay validation.
+- Reused the existing coherent pinned-block `readCredential` snapshot and existing `isAuthorized` policy; current owner, registration, expiry, resolver provenance, `access.v1`, and authorization timestamp are not reimplemented.
+- Added fail-closed serial/RPC handling, one-shot firmware behavior, duplicate-message protection, proof timeout handling, and `--check-replay` support.
+- Added scoped credential label/owner parameters for `guest-001.demo-access.eth` and intended owner `0x3419148731087b970d2059C53780163B452D5FF7` without changing `cred-001` defaults or lifecycle.
+- Added 16 tests across the Gate E bridge and separate-credential provisioning boundary. The complete Node suite passes 99/99.
+- Android production code remained unchanged and passed 21/21 JVM tests plus debug assembly. Both Gate D and Gate E firmware sketches compile with the existing ESP32/PN532 toolchain.
+- Performed zero blockchain writes. No live Gate E credential has been provisioned and no physical Gate E authorization has been run.
+- Technical learning: transport identity and authorization remain separate. NFC transports a fresh signed proof; Gate A verifies wallet control; ENSv2 determines current credential ownership and access.
+- Challenge issuance is intentionally delayed until the phone has activated and the application AID has been selected, preserving most of the short challenge TTL.
+
