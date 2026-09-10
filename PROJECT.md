@@ -7,7 +7,7 @@
 - Core flow: an operator activates or deactivates access in the browser; the local Node server updates PermissionedResolver `access.v1` on Sepolia; a user presents a fresh wallet-signed proof through Android HCE and the ESP32/PN532; the secure bridge verifies current holder control and reads the same authoritative ENSv2 state to produce an access decision.
 - Primary sponsor: ENS / ENSv2.
 - MVP: one end-to-end Sepolia vertical slice demonstrating ENSv2-authoritative credential state and a physical ISO14443A NFC interaction through the ESP32-S3 and PN532.
-- Verified local architecture: browser demo -> local Node server -> ENSv2 PermissionedResolver `access.v1` -> persistent UserRegistry credential; and fresh Node challenge -> ESP32/PN532 -> Android HCE/Privy proof -> Node Gate A verification -> coherent current ENSv2 read. Live Gate E authorization remains pending.
+- Verified architecture: browser demo -> local Node server -> ENSv2 PermissionedResolver `access.v1` -> persistent UserRegistry credential; and fresh Node challenge -> ESP32/PN532 -> Android HCE/Privy proof -> Node Gate A verification -> coherent current ENSv2 read -> one serial authorization command -> matching firmware confirmation. Gate E INACTIVE/DENY is physically verified; ACTIVE/ALLOW remains pending.
 - Verified lifecycle: the same NFC tag produced `DENY → ALLOW → DENY` while the credential remained REGISTERED with unchanged owner, tokenId, resolver, and registry expiry.
 - Future layers: presentation/collectible behavior, dynamic metadata, loyalty, transferability, and programmable benefits may build on the persistent credential, but none is implemented yet.
 - Non-goals: production-grade access control, complex infrastructure, multiple superficial sponsor integrations, and unrelated Hermes/Knowledge OS work.
@@ -24,7 +24,7 @@
 
 ## Security upgrade direction
 
-The fresh cryptographic holder-proof architecture is implemented locally; live provisioning and physical Gate E validation are the next security objective.
+The fresh cryptographic holder-proof architecture and physical Gate E INACTIVE/DENY path are verified. The immediate security objective is safe renewal of the existing REGISTERED INACTIVE guest record before its validity deadline; physical ACTIVE/ALLOW remains the next unproven Gate E result.
 
 Implemented local composition:
 
@@ -45,7 +45,7 @@ High-value layers already identified, but not yet implemented:
 
 - Further Privy onboarding/product UX beyond the implemented embedded-wallet signer.
 - Real USDC credential-issuance payment flow.
-- Live validation of the implemented Android HCE/mobile NFC secure presentation.
+- Physical validation of the remaining Gate E ACTIVE/ALLOW path.
 - Dynamic credential branding/metadata.
 - Credential transferability.
 - World Selfie Check before issuance/activation.

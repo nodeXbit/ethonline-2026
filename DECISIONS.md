@@ -527,3 +527,34 @@ Authentication, transport, and authorization stay separate: NFC transports the p
 ### Revisit when
 
 Only if live physical validation exposes a concrete transport or coherent-read defect that cannot be addressed within the frozen APDU v1 and Gate A semantics.
+
+---
+
+## D-017 — Require physical-controller confirmation before Gate E serial finalization
+
+**Status:** Accepted
+**Date:** 2026-09-10
+
+### Decision
+
+After Node computes a Gate E decision, send exactly one `AUTHORIZATION=ALLOW` or `AUTHORIZATION=DENY` command and keep the serial transport attached until the firmware emits the exact matching `AUTHORIZATION: ALLOW` or `AUTHORIZATION: DENY` terminal line.
+
+Use a bounded two-second local serial timeout. A contradictory terminal line is a protocol mismatch and fails closed. A timeout reports that the command was sent but confirmation was not observed; it must never be interpreted as ALLOW. Unrelated or premature serial lines do not satisfy confirmation.
+
+Do not resend authorization or repeat challenge issuance, NFC transport, signing, proof verification, replay verification, or ENS reads while awaiting this delivery confirmation.
+
+### Why
+
+The first successful physical Gate E INACTIVE authorization proved the entire cryptographic and ENS DENY path, and Node sent `AUTHORIZATION=DENY`, but Node closed COM4 before reliably capturing the firmware's existing `AUTHORIZATION: DENY` line. A subsequent controlled run with the corrected lifecycle captured that matching line before close and preserved same-proof replay denial.
+
+### Consequences
+
+- Gate E INACTIVE physical authorization is proven end to end, including controller receipt: PASS.
+- Gate E ACTIVE physical authorization remains unproven: PENDING.
+- Firmware, Android, APDU v1, Gate A, and ENS authorization semantics remain unchanged.
+- `guest-001` remains REGISTERED and INACTIVE; the validation used zero blockchain writes and did not use NFC UID.
+- The immediate P0 is safe renewal of the existing REGISTERED INACTIVE record before `access.validUntil = 1789107864` (2026-09-11 08:24:24 Europe/Madrid). Current tooling cannot perform that renewal while preserving INACTIVE safely.
+
+### Revisit when
+
+Measured serial behavior requires a different bounded timeout, or a documented controller protocol replaces the current line confirmation. Do not weaken exact-match or fail-closed behavior.

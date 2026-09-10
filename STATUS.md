@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Perform a read-only Gate E live preflight, then provision the separate Privy-owned credential in an INACTIVE state through explicitly authorized Sepolia writes. After provisioning, validate physical `DENY -> ALLOW -> replay DENY -> DENY` without using NFC UID as an authorization factor.
+Preserve the completed Gate E INACTIVE physical validation, then address the P0 safe-renewal gap for the existing REGISTERED INACTIVE `guest-001` record before attempting the still-pending ACTIVE/ALLOW physical milestone.
 
 ## Done
 - ChatGPT Project configured
@@ -45,11 +45,14 @@ Perform a read-only Gate E live preflight, then provision the separate Privy-own
 - Gate D passed 2/2 complete physical sessions. The earlier GET_SIGNATURE failure is classified as transient/not reproduced after the unchanged implementation transported the full 67-byte response twice.
 - Gate D requires no chunking. Final validation passed Node 83/83, Android 21/21, Android debug assembly, and firmware compilation.
 - Gate D proves physical cryptographic proof transport. It does not yet prove ENS-based physical authorization.
-- Gate E secure authorization implementation: PASS locally / LIVE VALIDATION PENDING. The Node bridge issues a fresh Gate A challenge only after target activation, AID SELECT, and `WAITING_CHALLENGE`; transports the exact 104-byte challenge to the ESP32; expects an exact 65-byte physical proof; and reuses the existing Gate A verifier, current ENS owner comparison, coherent `readCredential` snapshot, and `isAuthorized` policy.
+- Gate E secure authorization implementation: PASS locally. The Node bridge issues a fresh Gate A challenge only after target activation, AID SELECT, and `WAITING_CHALLENGE`; transports the exact 104-byte challenge to the ESP32; expects an exact 65-byte physical proof; and reuses the existing Gate A verifier, current ENS owner comparison, coherent `readCredential` snapshot, and `isAuthorized` policy.
 - Gate E replay-check support re-verifies the exact proof through the same in-memory challenge store and produces `REPLAYED_CHALLENGE` without another NFC operation, challenge, or blockchain write.
 - The separate Gate E firmware is fail-closed and one-shot. Credential label/owner parameters support a second credential without changing the existing `cred-001` defaults.
-- Gate E local validation passed Node 99/99, Android 21/21 plus debug assembly, and compilation of both Gate D and Gate E firmware. Android production code and APDU v1 remain unchanged.
-- No live Gate E credential has yet been provisioned. The planned secure credential is `guest-001.demo-access.eth`, intended owner `0x3419148731087b970d2059C53780163B452D5FF7`.
+- Gate E serial finalization now requires the exact matching firmware result after Node sends one `AUTHORIZATION=ALLOW` or `AUTHORIZATION=DENY`; the opposite result and a two-second confirmation timeout fail closed, and serial closes only after successful confirmation or terminal failure.
+- Gate E local validation passes Node 104/104, Gate E 20/20, Android 21/21 plus debug assembly, and Gate E firmware compilation. Android production code, firmware, APDU v1, Gate A semantics, and ENS semantics remain unchanged.
+- `guest-001.demo-access.eth` is REGISTERED to `0x3419148731087b970d2059C53780163B452D5FF7` with INACTIVE `access.v1`. Provisioning completed previously through `setData` transaction `0x34c47584a377bf6d77428d19a946a322d9d31fb040caf2bf40dc205bf97112bf` and `register` transaction `0x964e488bb056b86a72870251a46e91f569f4915fc102f2aeb573b71ae202f5da`.
+- GATE E INACTIVE PHYSICAL: PASS. One fresh physical proof produced `ACCESS_DENIED`; Node sent `AUTHORIZATION=DENY` exactly once and captured firmware `AUTHORIZATION: DENY` before closing COM4. Reuse of the same proof produced `REPLAYED_CHALLENGE` / DENY without new NFC, signing, challenge issuance, ENS read, or blockchain write. UID was unused.
+- GATE E ACTIVE PHYSICAL: PENDING.
 
 ## Sponsor / architecture delta
 
@@ -70,14 +73,14 @@ Perform a read-only Gate E live preflight, then provision the separate Privy-own
 
 ## Next
 
-1. Perform a read-only Gate E live preflight.
-2. With separate explicit authorization, provision `guest-001.demo-access.eth` for the intended Privy owner with INACTIVE access.
-3. Validate INACTIVE physical DENY, ACTIVE physical ALLOW, same-proof replay DENY, then INACTIVE physical DENY.
-4. Keep `cred-001`, NFC UID exclusion, and APDU v1 unchanged.
+1. Resolve the P0 tooling gap: safely renew an existing REGISTERED INACTIVE `guest-001` record while preserving INACTIVE before its `access.validUntil` deadline.
+2. After explicit authorization, validate the still-unproven ACTIVE physical ALLOW path with a fresh proof.
+3. Keep `cred-001`, NFC UID exclusion, APDU v1, and the one-shot Gate E session model unchanged.
 
 ## Blockers
 
-- Gate E code composition is complete locally; live credential provisioning and physical authorization validation remain pending explicit authorization.
+- Current tooling cannot safely renew an existing REGISTERED INACTIVE record while preserving INACTIVE. `guest-001` has `access.validUntil = 1789107864` (2026-09-11 08:24:24 Europe/Madrid); this is the immediate P0.
+- Gate E ACTIVE/ALLOW physical validation remains pending explicit authorization after the validity risk is handled.
 - World Selfie Check sandbox/access is an external dependency only if World is selected as a secondary sponsor.
 
 ## Risks
@@ -174,4 +177,17 @@ ESP32-S3 + Elechouse PN532 initiator
 
 The unchanged APDU v1 implementation passed 2/2 complete physical sessions. Full-size 67-byte responses fit the validated transport without chunking. An earlier GET_SIGNATURE failure was not reproduced and remains classified as transient rather than justification for a speculative PN532/HAL workaround.
 
-Gate D proves physical cryptographic proof transport. It does not yet prove ENS-based physical authorization.
+Gate D proves physical cryptographic proof transport. Gate E now additionally proves the INACTIVE ENS authorization path:
+
+```text
+one fresh physical Gate A proof
+  -> recovered signer equals current guest-001 ENS owner
+  -> challenge consumed
+  -> current access.active == false
+  -> ACCESS_DENIED
+  -> one AUTHORIZATION=DENY command
+  -> matching firmware AUTHORIZATION: DENY captured before serial close
+  -> same-proof replay REPLAYED_CHALLENGE / DENY
+```
+
+The controlled run used one 104-byte challenge transport, one SEND_CHALLENGE, `PROCESSING -> READY`, one successful GET_SIGNATURE, and one 65-byte proof. It performed zero blockchain writes and did not use NFC UID. The ACTIVE/ALLOW physical path has not yet been proven.

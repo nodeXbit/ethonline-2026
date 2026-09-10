@@ -150,3 +150,17 @@ No product code has been written yet.
 - Technical learning: transport identity and authorization remain separate. NFC transports a fresh signed proof; Gate A verifies wallet control; ENSv2 determines current credential ownership and access.
 - Challenge issuance is intentionally delayed until the phone has activated and the application AID has been selected, preserving most of the short challenge TTL.
 
+### Gate E provisioning and INACTIVE physical validation milestone
+
+- Provisioned `guest-001.demo-access.eth` previously as a separate REGISTERED credential owned by Privy wallet `0x3419148731087b970d2059C53780163B452D5FF7`, without modifying `cred-001`.
+- The provisioning writes were `setData` transaction `0x34c47584a377bf6d77428d19a946a322d9d31fb040caf2bf40dc205bf97112bf` and `register` transaction `0x964e488bb056b86a72870251a46e91f569f4915fc102f2aeb573b71ae202f5da`.
+- Completed one controlled physical INACTIVE run: TARGET activation and SELECT passed; Node issued one fresh challenge; the firmware transported one 104-byte challenge and sent SEND_CHALLENGE exactly once; Android progressed `PROCESSING -> READY`; GET_SIGNATURE returned one 65-byte proof.
+- Node recovered the current ENS owner, consumed the challenge, read `access.active == false`, and returned `ACCESS_DENIED`. NFC UID was not used.
+- The first successful INACTIVE proof exposed a serial-finalization race: Node sent `AUTHORIZATION=DENY` but detached before the firmware terminal line could be captured reliably.
+- Fixed only the Node serial lifecycle. It now sends the authorization command exactly once, waits up to two seconds for the exact matching `AUTHORIZATION: ALLOW` or `AUTHORIZATION: DENY` firmware line, fails closed on an opposite result or timeout, and closes serial afterward. It does not issue another challenge, repeat NFC/signing/proof verification, reread ENS, or resend authorization.
+- Repeated the bounded physical INACTIVE validation after the fix. Node sent `AUTHORIZATION=DENY` once, firmware emitted `AUTHORIZATION: DENY`, and the bridge captured it before COM4 closed.
+- Re-verifying the same proof in the same challenge store returned `REPLAYED_CHALLENGE` / DENY without another challenge, NFC operation, signature, ENS read, or blockchain write.
+- Validation passes Node 104/104, scoped Gate E 20/20, Android 21/21, Android `assembleDebug`, and Gate E firmware compilation. The physical validation itself performed zero blockchain writes.
+- GATE E INACTIVE PHYSICAL: PASS. GATE E ACTIVE PHYSICAL: PENDING.
+- Immediate P0: `guest-001` has `access.validUntil = 1789107864` (2026-09-11 08:24:24 Europe/Madrid), while current tooling cannot safely renew an existing REGISTERED INACTIVE record and preserve INACTIVE.
+
