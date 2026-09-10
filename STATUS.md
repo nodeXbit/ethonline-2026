@@ -2,9 +2,9 @@
 
 ## Current objective
 
-Gate C: prove Android Host Card Emulation can transport the holder-proof challenge/signature protocol over ISO-DEP/APDUs without changing Gate A/B cryptographic semantics.
+Gate C2: connect the already-proven Privy Android EIP-712 signer to the HCE `ProofProvider` abstraction while preserving APDU v1 and Gate A/B semantics.
 
-Keep Gate C Android/HCE-focused first. Do not modify PN532 firmware until the Android side has a deterministic APDU protocol and testable behavior.
+Keep PN532 firmware unchanged during Gate C2.
 
 ## Done
 - ChatGPT Project configured
@@ -34,6 +34,9 @@ Keep Gate C Android/HCE-focused first. Do not modify PN532 firmware until the An
 - Privy Android signing Gate B: PASS. Native email OTP authentication and embedded Ethereum EOA creation/reuse succeeded on a real Solana Seeker used strictly as a standard Android device.
 - Native `eth_signTypedData_v4` is empirically supported with `io.privy:privy-core:0.14.0`. The device signed the exact `ENSv2 Access` EIP-712 fixture, and Node/viem recovered the same public wallet address.
 - Gate B validation passed the complete 82-test repository suite and performed zero blockchain writes.
+- Android HCE protocol Gate C1: PASS. `HostApduService` is registered under the non-payment proprietary AID `F0454E5356324331`, with deterministic APDU v1 transporting the fixed 104-byte binary `AccessChallenge`.
+- Gate C1 implements the explicit `IDLE` / `PROCESSING` / `READY` / `ERROR` session model, an exact 65-byte proof response, session reset behavior, and stale asynchronous completion protection behind a replaceable `ProofProvider`.
+- Gate C1 Android JVM tests and debug assembly pass, and the complete Node suite remains green at 82/82.
 
 ## Sponsor / architecture delta
 
@@ -54,15 +57,15 @@ Keep Gate C Android/HCE-focused first. Do not modify PN532 firmware until the An
 
 ## Next
 
-1. Define a deterministic, bounded Gate C ISO-DEP/APDU protocol for transporting the existing holder-proof challenge and signature.
-2. Implement and test Android HCE behavior first without changing Gate A/B cryptographic semantics.
-3. Keep PN532 firmware unchanged until the Android HCE side has deterministic, testable behavior.
+1. Implement Gate C2 by connecting the proven Privy Android EIP-712 signer to `ProofProvider`.
+2. Preserve the Gate C1 APDU v1 contract and all Gate A/B cryptographic semantics.
+3. Keep PN532 firmware unchanged until Gate C2 passes.
 4. Preserve the static NFC UID exclusion: it remains outside secure authorization.
 
 ## Blockers
 
 - Transport of the proven wallet signature over the physical NFC/HCE path is not yet validated.
-- Gate B proves signing interoperability only; secure physical challenge transport and end-to-end physical authorization remain Gate C work.
+- Gate C1 proves deterministic Android-side HCE protocol behavior only. It does not prove Privy signing from HCE, real phone-to-PN532 communication, or physical cryptographic authorization.
 - World Selfie Check sandbox/access is an external dependency only if World is selected as a secondary sponsor.
 
 ## Risks
@@ -116,3 +119,16 @@ Privy Android embedded EOA
 The real-device test used `io.privy:privy-core:0.14.0` on a Solana Seeker as a generic Android device. Native `eth_signTypedData_v4` is empirically supported, the recovered signer matched public wallet `0x3419148731087b970d2059C53780163B452D5FF7`, the full suite passes 82 tests, and the test caused zero blockchain writes.
 
 Gate B proves signing interoperability only. It does not yet prove NFC/HCE transport, physical cryptographic access, ENS credential ownership by the Privy wallet, a payment flow, or Privy prize qualification.
+
+Gate C1 additionally proves deterministic Android-side HCE transport semantics:
+
+```text
+SELECT proprietary non-payment AID
+  -> receive 104-byte binary AccessChallenge
+  -> PROCESSING / READY state machine
+  -> return exact 65-byte proof payload
+```
+
+The implementation resets proof state on a new challenge, SELECT, or HCE deactivation and prevents stale provider completions from affecting newer sessions. Android JVM tests and `assembleDebug` pass, while the existing Node suite remains green at 82/82.
+
+Gate C1 does not yet prove Privy signing from HCE, real phone-to-PN532 communication, or physical cryptographic authorization.

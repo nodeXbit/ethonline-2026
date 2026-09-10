@@ -98,3 +98,16 @@ No product code has been written yet.
 - An early public-signature transfer introduced Cyrillic Unicode characters. Structural validation rejected it before cryptographic recovery; a byte-preserving transfer then passed. Public signatures are not secrets, but their transport must preserve exact bytes.
 - Technical learning: SDK/API availability in source is insufficient evidence; signing support had to be exercised through the real provider on a physical device.
 
+### Android HCE/APDU Gate C1 milestone
+
+- Registered a thin Android `HostApduService` under proprietary, non-payment AID `F0454E5356324331` (`F0` + ASCII `ENSV2C1`, category `other`).
+- Fixed APDU v1 around SELECT, SEND_CHALLENGE, GET_STATUS, and GET_SIGNATURE without changing Gate A/B cryptographic semantics.
+- Defined the 104-byte binary challenge as `credential[32] || resource[32] || nonce[32] || expiresAt[8 unsigned big-endian]`; no JSON or identity metadata is transported over NFC.
+- Defined the successful proof payload as exactly 65 signature bytes followed by ISO 7816 status `9000`.
+- Implemented the independently testable `IDLE` / `PROCESSING` / `READY` / `ERROR` state machine outside the Android service adapter.
+- Added a `ProofProvider` boundary: production Gate C1 performs no signing, while deterministic proof completion and the obvious 65-byte fixture exist only in JVM test code.
+- A new challenge, SELECT, or HCE deactivation clears proof state. Generation binding prevents a stale asynchronous provider completion from overwriting a newer session.
+- Android JVM tests and `:app:assembleDebug` passed; the complete Node suite remained green at 82/82.
+- No phone-to-reader NFC exchange was performed or claimed. Gate C1 proves deterministic Android-side HCE protocol behavior only.
+- Technical learning: NFC/HCE is only the transport layer. Replay security remains authoritative in Gate A, while cryptographic signing remains separated behind `ProofProvider` for Gate C2.
+

@@ -377,3 +377,42 @@ Real-device email OTP authentication, embedded EOA creation/reuse, exact typed-d
 ### Revisit when
 
 A later wallet model requires ERC-1271/6492, or a proven product requirement changes the mobile signer.
+
+---
+
+## D-013 — Gate C APDU v1 separates HCE transport from signing
+
+**Status:** Accepted
+**Date:** 2026-09-10
+
+### Decision
+
+Fix Gate C APDU v1 for the current prototype around the proprietary, non-payment AID `F0454E5356324331` (`F0` + ASCII `ENSV2C1`, category `other`).
+
+Transport the Gate A challenge without JSON in this exact 104-byte wire format:
+
+```text
+credential[32] || resource[32] || nonce[32] || expiresAt[8 unsigned big-endian]
+```
+
+The proof wire payload is exactly 65 signature bytes. `ProofProvider` separates HCE transport/state from the signing implementation, and Gate C2 must preserve this APDU contract.
+
+A READY proof may be reread during the same selected transport session so an interrupted GET_SIGNATURE can be retried. A new challenge, SELECT, or HCE deactivation clears it.
+
+### Why
+
+The smallest deterministic protocol is sufficient to transport the existing Gate A-compatible holder proof without duplicating EIP-712 semantics or coupling Android NFC callbacks to Privy. Session generation binding prevents stale asynchronous signing completion from exposing a proof for a newer challenge.
+
+Gate A remains authoritative for cryptographic one-shot replay protection; HCE is only the transport layer.
+
+### Consequences
+
+- Production Gate C1 contains no fake signing and remains PROCESSING until a real provider is connected.
+- Gate C2 replaces the pending provider with the already-proven Privy EIP-712 signer without changing APDU v1.
+- Static NFC UID remains outside authorization.
+- PN532 firmware and physical phone-to-reader validation are deferred until Gate C2 passes.
+- Gate C1 does not claim real NFC interoperability or physical cryptographic authorization.
+
+### Revisit when
+
+Only if physical interoperability proves an APDU-level incompatibility that cannot be resolved while preserving the current contract.
