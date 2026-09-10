@@ -3,7 +3,7 @@ import test from 'node:test';
 import { decodeFunctionData, encodeAbiParameters, encodeEventTopics, isAddressEqual, zeroAddress } from 'viem';
 import { AVAILABLE, ETHRegistry, REGISTERED, VerifiableFactory, factoryAbi } from './contracts.mjs';
 import {
-  accessDuration, credentialNode, decodeAccess, encodeAccess, expectedRegistry,
+  accessDuration, credentialIdentity, credentialNode, decodeAccess, encodeAccess, expectedRegistry,
   isAuthorized, PermissionedResolverImpl, predictResolver, readCredential, resolverAbi, resolverRoles,
 } from './access-record.mjs';
 import {
@@ -113,6 +113,7 @@ function chain(options = {}) {
   const writes = [];
   const writeAttempts = [];
   const calls = [];
+  const requests = [];
   const nonceCalls = { latest: 0, pending: 0 };
   let lastReceipt;
   const equals = isAddressEqual;
@@ -157,7 +158,7 @@ function chain(options = {}) {
       }
       if (equals(args.address, predicted) || equals(args.address, resolver)) {
         assert.equal(args.functionName, 'data');
-        assert.deepEqual(args.args, [credentialNode, 'access.v1']);
+        assert.deepEqual(args.args, [state.credentialNode ?? credentialNode, 'access.v1']);
         return state.access;
       }
       const parent = equals(args.address, ETHRegistry);
@@ -176,6 +177,7 @@ function chain(options = {}) {
     },
     simulateContract: async request => {
       calls.push('simulate:' + request.functionName);
+      requests.push(request);
       if (request.functionName === 'setData' && state.simulationFailures > 0) {
         state.simulationFailures--;
         throw transientRpcError();
@@ -235,6 +237,7 @@ function chain(options = {}) {
         assert.ok(decodeAccess(state.access).validUntil > state.timestamp);
         assert.equal(request.args[4], 0n);
         state.status = REGISTERED;
+        state.holder = request.args[1];
         state.expiry = request.args[5];
         state.pointer = request.args[3];
       } else throw Error('Unexpected write');
@@ -243,7 +246,7 @@ function chain(options = {}) {
       return hash;
     } },
   };
-  return { state, writes, writeAttempts, calls, client, context };
+  return { state, writes, writeAttempts, calls, requests, client, context };
 }
 
 const registered = { status: REGISTERED, deployed: true, expiry: 1000000n };
@@ -528,6 +531,25 @@ test('expiry invariants replace fixed multi-day threshold', () => {
   assert.equal(registrationExpiry({ ...base, parentExpiry: 86501n }), 86501n);
   assert.throws(() => registrationExpiry({ ...base, parentExpiry: 90000n }, 90000n));
   assert.equal(registrationExpiry({ ...base, parentExpiry: 999999999n }), 100n + 365n * accessDuration);
+});
+
+test('scoped setup can provision a separate label and owner without changing cred-001 defaults', async () => {
+  const guestOwner = '0x3419148731087b970d2059C53780163B452D5FF7';
+  const guest = credentialIdentity('guest-001');
+  const c = chain({ credentialNode: guest.node, deployed: true, parentResolver: resolver });
+  const result = await setupCredential(c.context, {
+    credentialLabel: guest.label,
+    credentialOwner: guestOwner,
+  });
+  const registration = c.requests.find(request => request.functionName === 'register');
+  assert.deepEqual(registration.args.slice(0, 2), [guest.label, guestOwner]);
+  assert.equal(result.credentialName, guest.name);
+  assert.equal(result.credentialNode, guest.node);
+  assert.notEqual(result.credentialNode, credentialNode);
+  assert.ok(isAddressEqual(result.owner, guestOwner));
+  assert.equal(result.access.active, false);
+  assert.equal(registration.args[3], resolver);
+  assert.deepEqual(c.writes, ['setData', 'register']);
 });
 
 test('persistent failures expose safe stage, operation, custom error and submitted hash', () => {

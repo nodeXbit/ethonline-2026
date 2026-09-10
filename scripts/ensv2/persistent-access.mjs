@@ -1,6 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import {
-  createPublicClient, encodeFunctionData, http, isAddressEqual, parseEventLogs, zeroAddress,
+  createPublicClient, encodeFunctionData, http, isAddress, isAddressEqual, parseEventLogs, zeroAddress,
 } from 'viem';
 import { sepolia } from 'viem/chains';
 import {
@@ -8,7 +8,7 @@ import {
   requireCode, requireCondition, send,
 } from './contracts.mjs';
 import {
-  accessDuration, accessKey, accessRegistryAbi, canonicalResolver, credentialLabel,
+  accessDuration, accessKey, accessRegistryAbi, canonicalResolver, credentialIdentity, credentialLabel,
   credentialNode, encodeAccess, expectedRegistry, parentName, readAccess,
   PermissionedResolverImpl, readCredential, resolverAbi, resolverRoles, verifyResolver,
 } from './access-record.mjs';
@@ -37,7 +37,7 @@ export function requireSameCredential(before, after) {
 
 function printSnapshot(s) {
   console.log({
-    credential: `${credentialLabel}.${parentName}`,
+    credential: s.credentialName,
     status: ['AVAILABLE', 'RESERVED', 'REGISTERED'][s.state.status] ?? s.state.status,
     owner: s.owner, registryExpiry: s.expiry.toString(), tokenId: s.tokenId.toString(),
     resource: s.state.resource.toString(), resolver: s.resolver,
@@ -48,10 +48,17 @@ function printSnapshot(s) {
   console.log(`AUTHORIZATION: ${s.authorized ? 'ALLOW' : 'DENY'}`);
 }
 
-const dataCall = (resolver, access) => ({
+const dataCall = (resolver, access, node = credentialNode) => ({
   address: resolver, abi: resolverAbi, functionName: 'setData',
-  args: [credentialNode, accessKey, encodeAccess(access)],
+  args: [node, accessKey, encodeAccess(access)],
 });
+
+function targetCredential(context, options = {}) {
+  const identity = credentialIdentity(options.credentialLabel ?? credentialLabel);
+  const owner = options.credentialOwner ?? context.account.address;
+  requireCondition(isAddress(owner), 'Credential owner must be an Ethereum address.');
+  return { ...identity, owner };
+}
 
 let stage = 'configuration';
 const pendingMessage = 'DEV has unresolved pending transactions. Wait for their result before rerunning setup.';
@@ -241,6 +248,7 @@ const delay = milliseconds => new Promise(resolve => setTimeout(resolve, millise
 
 async function recoverSubmittedAccess(context, {
   transactionHash, before, access, receipt: knownReceipt,
+  credentialLabel: label = credentialLabel,
   recoveryDelays = defaultRecoveryDelays, sleep = delay,
 }) {
   let receipt = knownReceipt;
@@ -255,7 +263,7 @@ async function recoverSubmittedAccess(context, {
     }
     if (receipt.status !== 'success') throw new RevertedAccessTransaction(transactionHash);
     try {
-      const after = await readCredential(context.publicClient, { includeParent: true });
+      const after = await readCredential(context.publicClient, { includeParent: true, label });
       verifyAccessUpdate(before, after, access, receipt.blockNumber);
       console.log({ operation: 'setData', transactionHash,
         blockNumber: receipt.blockNumber.toString(), recovered: true });
@@ -284,26 +292,28 @@ async function recoverSubmittedAccess(context, {
 }
 
 // Each iteration reconstructs the next step from confirmed chain state. No local checkpoint.
-export async function setupCredential(context) {
+export async function setupCredential(context, options = {}) {
   const { publicClient: client, account } = context;
+  const target = targetCredential(context, options);
   requireCondition(await client.getChainId() === sepolia.id, 'RPC must be Sepolia.');
   await Promise.all([ETHRegistry, expectedRegistry, VerifiableFactory, PermissionedResolverImpl]
     .map(address => requireCode(client, address)));
   let minimumBlock = 0n;
   for (;;) {
     stage = 'setup state discovery';
-    const before = await readCredential(client, { includeParent: true });
+    const before = await readCredential(client, { includeParent: true, label: target.label });
     requireCondition(before.block.number >= minimumBlock, 'Setup snapshot predates confirmed transaction.');
     if (before.state.status === REGISTERED) {
       requireRegistered(before);
-      requireCondition(isAddressEqual(before.owner, account.address), 'Registered credential is not held by DEV.');
+      requireCondition(isAddressEqual(before.owner, target.owner),
+        'Registered credential is not held by the intended owner.');
       requireCondition(!isAddressEqual(before.resolver, zeroAddress), 'Registered credential has no resolver.');
       // readCredential already verifies the authoritative resolver and strictly decodes the record.
       if (before.access !== null) return before;
       stage = 'registered missing-record recovery';
       const access = setupAccess(REGISTERED, null, before.block.timestamp);
-      const transaction = await setupSend(context, dataCall(before.resolver, access));
-      const after = await readCredential(client, { includeParent: true });
+      const transaction = await setupSend(context, dataCall(before.resolver, access, target.node));
+      const after = await readCredential(client, { includeParent: true, label: target.label });
       requireCondition(after.block.number >= transaction.receipt.blockNumber, 'Recovery readback predates write.');
       requireSameCredential(before, after);
       requireCondition(sameAccess(after.access, access), 'Recovery access readback mismatch.');
@@ -325,11 +335,11 @@ export async function setupCredential(context) {
     // A nonzero parent pointer must be proven; never replace an unknown parent resolver.
     requireCondition(prediction || deployed, 'Parent resolver bytecode is absent.');
     if (deployed) await verifyResolver(client, resolver, before.block.number);
-    const access = deployed ? await readAccess(client, resolver, before.block.number) : null;
+    const access = deployed ? await readAccess(client, resolver, before.block.number, target.node) : null;
     const inactive = setupAccess(AVAILABLE, access, before.block.timestamp);
     expiry = registrationExpiry(before, inactive.validUntil);
     const registration = { address: expectedRegistry, abi: accessRegistryAbi, functionName: 'register',
-      args: [credentialLabel, account.address, zeroAddress, resolver, 0n, expiry] };
+      args: [target.label, target.owner, zeroAddress, resolver, 0n, expiry] };
     // Check registry authority before any deployment or record write. register stores the
     // resolver pointer without calling it, so this is valid even for an undeployed candidate.
     await client.simulateContract({ ...registration, account });
@@ -350,11 +360,11 @@ export async function setupCredential(context) {
     }
 
     // Prove DEV control even when preserving an existing inactive record.
-    await client.simulateContract({ ...dataCall(resolver, inactive), account });
+    await client.simulateContract({ ...dataCall(resolver, inactive, target.node), account });
     if (!sameAccess(access, inactive)) {
       stage = 'inactive record initialization';
-      const initialization = await setupSend(context, dataCall(resolver, inactive));
-      const stored = await readAccess(client, resolver, initialization.receipt.blockNumber);
+      const initialization = await setupSend(context, dataCall(resolver, inactive, target.node));
+      const stored = await readAccess(client, resolver, initialization.receipt.blockNumber, target.node);
       requireCondition(sameAccess(stored, inactive), 'Inactive initialization readback mismatch.');
       minimumBlock = initialization.receipt.blockNumber;
       continue;
@@ -364,10 +374,10 @@ export async function setupCredential(context) {
     // followed by fresh snapshots above, so recovery uses the same path as first setup.
     stage = 'persistent registration';
     const registered = await setupSend(context, registration);
-    const after = await readCredential(client, { includeParent: true });
+    const after = await readCredential(client, { includeParent: true, label: target.label });
     requireRegistered(after);
     requireCondition(after.block.number >= registered.receipt.blockNumber &&
-      after.tokenId === registered.result && isAddressEqual(after.owner, account.address) &&
+      after.tokenId === registered.result && isAddressEqual(after.owner, target.owner) &&
       isAddressEqual(after.resolver, resolver) && isAddressEqual(after.subregistry, zeroAddress) &&
       after.expiry === expiry && after.expiry <= after.parentExpiry && sameAccess(after.access, inactive),
     'Persistent registration readback mismatch.');
@@ -379,10 +389,13 @@ export async function updateAccess(context, action, recoveryOptions = {}) {
   requireCondition(action === 'activate' || action === 'deactivate',
     'Access action must be activate or deactivate.');
   stage = 'access update preflight';
+  const target = targetCredential(context, recoveryOptions);
   const preSubmissionRetryOptions = recoveryOptions.preSubmissionRetryOptions ?? {};
   const before = await retryPreSubmissionRpc(
-    () => readCredential(context.publicClient, { includeParent: true }),
+    () => readCredential(context.publicClient, { includeParent: true, label: target.label }),
     { ...preSubmissionRetryOptions, stage: 'access update credential read' });
+  requireCondition(isAddressEqual(before.owner, target.owner),
+    'Credential is not held by the intended owner.');
   if (accessStateAchieved(before, action)) {
     return {
       changed: false,
@@ -401,7 +414,7 @@ export async function updateAccess(context, action, recoveryOptions = {}) {
   stage = 'simulated access update';
   const { request } = await retryPreSubmissionRpc(
     () => context.publicClient.simulateContract({
-      ...dataCall(before.resolver, access), account: context.account,
+      ...dataCall(before.resolver, access, target.node), account: context.account,
     }), { ...preSubmissionRetryOptions, stage: 'access update simulation' });
   await requireNoPendingAccess(context.publicClient, context.account.address,
     preSubmissionRetryOptions, 'post-simulation');
@@ -423,7 +436,7 @@ export async function updateAccess(context, action, recoveryOptions = {}) {
   stage = 'access and persistent identity readback';
   let after;
   try {
-    after = await readCredential(context.publicClient, { includeParent: true });
+    after = await readCredential(context.publicClient, { includeParent: true, label: target.label });
     verifyAccessUpdate(before, after, access, receipt.blockNumber);
   } catch {
     return recoverSubmittedAccess(context, {
@@ -441,29 +454,43 @@ export async function updateAccess(context, action, recoveryOptions = {}) {
   };
 }
 
-export async function main(action = process.argv[2]) {
+export function parseCredentialOptions(args = []) {
+  const options = {};
+  for (let index = 0; index < args.length; index += 2) {
+    const flag = args[index];
+    const value = args[index + 1];
+    requireCondition(Boolean(value), `${flag ?? 'Option'} requires a value.`);
+    if (flag === '--credential-label') options.credentialLabel = value;
+    else if (flag === '--credential-owner') options.credentialOwner = value;
+    else throw new Error(`Unknown option: ${flag}`);
+  }
+  return options;
+}
+
+export async function main(action = process.argv[2], args = process.argv.slice(3)) {
   requireCondition(['setup', 'activate', 'deactivate', 'inspect'].includes(action),
     'Command must be setup, activate, deactivate or inspect.');
+  const credentialOptions = parseCredentialOptions(args);
   // No signing connection or prior resolver knowledge is needed for inspect.
   if (action === 'inspect') {
     const client = createPublicClient({ chain: sepolia,
       transport: http(process.env.SEPOLIA_RPC_URL?.trim() || undefined) });
     requireCondition(await client.getChainId() === sepolia.id, 'RPC must be Sepolia.');
     stage = 'read-only inspection';
-    printSnapshot(await readCredential(client));
+    printSnapshot(await readCredential(client, { label: credentialOptions.credentialLabel }));
     return;
   }
   const context = await connect();
   requireCondition(context.parent === parentName, 'This demo requires demo-access.eth.');
   if (action === 'setup') {
-    const ready = await setupCredential(context);
+    const ready = await setupCredential(context, credentialOptions);
     printSnapshot(ready);
     console.log('PERSISTENT CREDENTIAL: READY');
     console.log(`ACCESS STATE: ${ready.access.active ? 'ACTIVE' : 'INACTIVE'}`);
     return;
   }
 
-  const result = await updateAccess(context, action);
+  const result = await updateAccess(context, action, credentialOptions);
   printSnapshot(result.credential);
   console.log(`ACCESS STATE: ${result.credential.access.active ? 'ACTIVE' : 'INACTIVE'}`);
 }

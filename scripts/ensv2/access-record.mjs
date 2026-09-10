@@ -32,6 +32,16 @@ export const accessRegistryAbi = [...registryAbi, ...parseAbi([
 ])];
 const schema = [{ type: 'bool' }, { type: 'uint64' }];
 
+export function credentialIdentity(label = credentialLabel) {
+  requireCondition(typeof label === 'string' && /^(?!-)[a-z0-9-]+(?<!-)$/.test(label),
+    'Credential label must be a normalized ENS label.');
+  return Object.freeze({
+    label,
+    name: `${label}.${parentName}`,
+    node: namehash(`${label}.${parentName}`),
+  });
+}
+
 export function encodeAccess({ active, validUntil }) {
   requireCondition(typeof active === 'boolean' && typeof validUntil === 'bigint',
     'Invalid access.v1 value types.');
@@ -98,15 +108,18 @@ export function isAuthorized({ state, owner, expiry, block, access }) {
     expiry > block.timestamp && access?.active === true && access.validUntil > block.timestamp;
 }
 
-export async function readAccess(client, resolver, blockNumber) {
+export async function readAccess(client, resolver, blockNumber, node = credentialNode) {
   return decodeAccess(await client.readContract({
     address: resolver, abi: resolverAbi, functionName: 'data',
-    args: [credentialNode, accessKey], blockNumber,
+    args: [node, accessKey], blockNumber,
   }));
 }
 
 // All chain reads, including provenance and resolver data, use the same block.
-export async function readCredential(client, { includeParent = false } = {}) {
+export async function readCredential(client, {
+  includeParent = false, label = credentialLabel,
+} = {}) {
+  const credential = credentialIdentity(label);
   const block = await client.getBlock();
   requireCondition(block.number !== null, 'Cannot pin pending block.');
   const read = (address, functionName, args) => client.readContract({
@@ -116,7 +129,7 @@ export async function readCredential(client, { includeParent = false } = {}) {
   requireCondition(isAddressEqual(registry, expectedRegistry), 'Unexpected parent UserRegistry.');
   const code = await client.getCode({ address: registry, blockNumber: block.number });
   requireCondition(Boolean(code && code !== '0x'), 'UserRegistry bytecode is absent.');
-  const tokenId = await read(registry, 'findTokenId', [credentialLabel]);
+  const tokenId = await read(registry, 'findTokenId', [credential.label]);
   const [state, owner, expiry] = await Promise.all([
     read(registry, 'getState', [tokenId]), read(registry, 'getOwner', [tokenId]),
     read(registry, 'getExpiry', [tokenId]),
@@ -127,14 +140,17 @@ export async function readCredential(client, { includeParent = false } = {}) {
   let access = null;
   // Registry invalidity is DENY without touching resolver code or records.
   if (state.status === REGISTERED && !isAddressEqual(owner, zeroAddress) && expiry > block.timestamp) {
-    resolver = await read(registry, 'getResolver', [credentialLabel]);
+    resolver = await read(registry, 'getResolver', [credential.label]);
     if (!isAddressEqual(resolver, zeroAddress)) {
       await verifyResolver(client, resolver, block.number);
-      access = await readAccess(client, resolver, block.number);
+      access = await readAccess(client, resolver, block.number, credential.node);
     }
-    if (includeParent) subregistry = await read(registry, 'getSubregistry', [credentialLabel]);
+    if (includeParent) subregistry = await read(registry, 'getSubregistry', [credential.label]);
   }
-  const result = { block, registry, tokenId, state, owner, expiry, resolver, subregistry, access };
+  const result = {
+    block, registry, tokenId, state, owner, expiry, resolver, subregistry, access,
+    credentialLabel: credential.label, credentialName: credential.name, credentialNode: credential.node,
+  };
   if (includeParent) {
     const parentTokenId = await read(ETHRegistry, 'findTokenId', [parentLabel]);
     [result.parentOwner, result.parentExpiry, result.parentResolver] = await Promise.all([
