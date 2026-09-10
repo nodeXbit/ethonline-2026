@@ -9,6 +9,7 @@ import {
 } from './holder-proof.mjs';
 import {
   GateESecureBridge, gateECredential, gateEResourceId, parseProofLine, serializeChallenge,
+  waitForBridgeAndClose,
 } from './gate-e-secure-bridge.mjs';
 
 // TEST ONLY deterministic fixtures. No project wallet or captured physical proof is used.
@@ -26,7 +27,13 @@ function credentialState(active = true, owner = holder.address) {
   };
 }
 
-function harness({ active = true, checkReplay = false, readState, proofTimeoutMs = 30_000 } = {}) {
+function harness({
+  active = true,
+  checkReplay = false,
+  readState,
+  proofTimeoutMs = 30_000,
+  firmwareConfirmationTimeoutMs = 2_000,
+} = {}) {
   const store = new IssuedChallengeStore();
   const clock = { now: startTime };
   const sent = [];
@@ -65,6 +72,7 @@ function harness({ active = true, checkReplay = false, readState, proofTimeoutMs
     sendLine: async line => { sent.push(line); },
     checkReplay,
     proofTimeoutMs,
+    firmwareConfirmationTimeoutMs,
     setTimer: callback => { timers.push(callback); return timers.length - 1; },
     clearTimer: id => { if (id !== undefined) timers[id] = undefined; },
   });
@@ -82,6 +90,10 @@ async function reachChallenge(bridge) {
 
 async function signChallenge(account, challenge) {
   return account.signTypedData(buildAccessChallengeTypedData(challenge));
+}
+
+function authorizationLines(sent) {
+  return sent.filter(line => line.startsWith('AUTHORIZATION='));
 }
 
 test('WAITING_CHALLENGE issues exactly one Gate A challenge', async () => {
@@ -166,7 +178,7 @@ test('correct current holder plus ACTIVE snapshot sends ALLOW exactly once', asy
   await h.bridge.receiveLine(`PROOF=${signature}`);
   assert.equal(h.bridge.result.reason, verificationReason.ALLOW);
   assert.equal(h.bridge.result.allowed, true);
-  assert.deepEqual(h.sent.filter(line => line.startsWith('AUTHORIZATION=')), ['AUTHORIZATION=ALLOW']);
+  assert.deepEqual(authorizationLines(h.sent), ['AUTHORIZATION=ALLOW']);
 });
 
 test('correct current holder plus INACTIVE snapshot denies after consumption', async () => {
@@ -188,7 +200,10 @@ test('replay check reuses the same proof and store with zero new challenge', asy
   assert.equal(h.bridge.replayResult.reason, verificationReason.REPLAYED_CHALLENGE);
   assert.equal(h.bridge.replayResult.allowed, false);
   assert.deepEqual(h.counts(), { issueCount: 1, verifyCount: 2, ensReads: 1 });
-  assert.deepEqual(h.sent.filter(line => line.startsWith('AUTHORIZATION=')), ['AUTHORIZATION=ALLOW']);
+  const completion = h.bridge.waitForCompletion();
+  await h.bridge.receiveLine('AUTHORIZATION: ALLOW');
+  await completion;
+  assert.deepEqual(authorizationLines(h.sent), ['AUTHORIZATION=ALLOW']);
 });
 
 test('wrong holder denies and never sends ALLOW', async () => {
@@ -224,8 +239,11 @@ test('proof timeout denies with no second challenge or SEND_CHALLENGE payload', 
   const h = harness();
   await reachChallenge(h.bridge);
   const timeout = h.timers.find(Boolean);
+  const completion = h.bridge.waitForCompletion();
   timeout();
-  await h.bridge.waitForCompletion();
+  await Promise.resolve();
+  await h.bridge.receiveLine('AUTHORIZATION: DENY');
+  await completion;
   assert.equal(h.bridge.result.reason, 'PROOF_TIMEOUT');
   assert.equal(h.counts().issueCount, 1);
   assert.equal(h.sent.filter(line => line.startsWith('CHALLENGE=')).length, 1);
@@ -241,7 +259,98 @@ test('duplicate and late serial messages cannot create a second authorization at
   await h.bridge.receiveLine('WAITING_CHALLENGE');
   await h.bridge.receiveLine('PROOF=malformed');
   assert.deepEqual(h.counts(), { issueCount: 1, verifyCount: 1, ensReads: 1 });
-  assert.equal(h.sent.filter(line => line.startsWith('AUTHORIZATION=')).length, 1);
+  assert.equal(authorizationLines(h.sent).length, 1);
+});
+
+test('DENY waits for matching firmware confirmation before completion and serial close', async () => {
+  const h = harness({ active: false });
+  const serial = { closeCount: 0 };
+  await reachChallenge(h.bridge);
+  const completion = waitForBridgeAndClose(h.bridge, async () => { serial.closeCount++; });
+  await h.bridge.receiveLine(`PROOF=${await signChallenge(holder, h.bridge.challenge)}`);
+
+  assert.deepEqual(authorizationLines(h.sent), ['AUTHORIZATION=DENY']);
+  assert.equal(h.bridge.state, 'AWAITING_FIRMWARE_CONFIRMATION');
+  assert.equal(serial.closeCount, 0);
+
+  await h.bridge.receiveLine('AUTHORIZATION: DENY');
+  const result = await completion;
+  assert.equal(result.reason, verificationReason.ACCESS_DENIED);
+  assert.equal(h.bridge.firmwareConfirmation, 'AUTHORIZATION: DENY');
+  assert.equal(serial.closeCount, 1);
+});
+
+test('ALLOW waits for matching firmware confirmation and sends authorization exactly once', async () => {
+  const h = harness({ active: true });
+  await reachChallenge(h.bridge);
+  const completion = h.bridge.waitForCompletion();
+  await h.bridge.receiveLine(`PROOF=${await signChallenge(holder, h.bridge.challenge)}`);
+
+  assert.deepEqual(authorizationLines(h.sent), ['AUTHORIZATION=ALLOW']);
+  assert.equal(h.bridge.state, 'AWAITING_FIRMWARE_CONFIRMATION');
+  await h.bridge.receiveLine('AUTHORIZATION: ALLOW');
+  const result = await completion;
+  assert.equal(result.allowed, true);
+  assert.equal(h.bridge.firmwareConfirmation, 'AUTHORIZATION: ALLOW');
+  assert.deepEqual(authorizationLines(h.sent), ['AUTHORIZATION=ALLOW']);
+});
+
+test('opposite firmware authorization fails closed without resending authorization', async () => {
+  const h = harness({ active: false });
+  await reachChallenge(h.bridge);
+  const completion = h.bridge.waitForCompletion();
+  await h.bridge.receiveLine(`PROOF=${await signChallenge(holder, h.bridge.challenge)}`);
+  await h.bridge.receiveLine('AUTHORIZATION: ALLOW');
+
+  await assert.rejects(completion, error => {
+    assert.equal(error.reason, 'FIRMWARE_AUTHORIZATION_MISMATCH');
+    assert.equal(error.expectedFirmwareConfirmation, 'AUTHORIZATION: DENY');
+    assert.equal(error.observedFirmwareConfirmation, 'AUTHORIZATION: ALLOW');
+    return true;
+  });
+  assert.equal(h.bridge.state, 'DONE');
+  assert.deepEqual(authorizationLines(h.sent), ['AUTHORIZATION=DENY']);
+});
+
+test('firmware confirmation timeout stops without ALLOW or a second operation', async () => {
+  const h = harness({ active: false });
+  await reachChallenge(h.bridge);
+  const completion = h.bridge.waitForCompletion();
+  await h.bridge.receiveLine(`PROOF=${await signChallenge(holder, h.bridge.challenge)}`);
+  const confirmationTimeout = h.timers.find(Boolean);
+  confirmationTimeout();
+
+  await assert.rejects(completion, error => {
+    assert.equal(error.reason, 'FIRMWARE_CONFIRMATION_TIMEOUT');
+    assert.match(error.message, /was sent but firmware confirmation was not observed/);
+    return true;
+  });
+  assert.ok(!h.sent.includes('AUTHORIZATION=ALLOW'));
+  assert.deepEqual(authorizationLines(h.sent), ['AUTHORIZATION=DENY']);
+  assert.deepEqual(h.counts(), { issueCount: 1, verifyCount: 1, ensReads: 1 });
+  assert.equal(h.sent.filter(line => line.startsWith('CHALLENGE=')).length, 1);
+});
+
+test('unrelated and early terminal lines cannot satisfy firmware confirmation', async () => {
+  const h = harness({ active: false });
+  let settled = false;
+  await h.bridge.receiveLine('AUTHORIZATION: DENY');
+  await reachChallenge(h.bridge);
+  const completion = h.bridge.waitForCompletion().then(result => {
+    settled = true;
+    return result;
+  });
+  await h.bridge.receiveLine(`PROOF=${await signChallenge(holder, h.bridge.challenge)}`);
+
+  await h.bridge.receiveLine('PROCESSING');
+  await h.bridge.receiveLine('AUTHORIZATION: DENY ');
+  await Promise.resolve();
+  assert.equal(settled, false);
+  assert.equal(h.bridge.state, 'AWAITING_FIRMWARE_CONFIRMATION');
+
+  await h.bridge.receiveLine('AUTHORIZATION: DENY');
+  await completion;
+  assert.equal(settled, true);
 });
 
 test('NFC UID text is ignored and is not a secure authorization input', async () => {

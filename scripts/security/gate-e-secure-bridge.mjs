@@ -15,6 +15,16 @@ export const gateEResourceName = 'demo-access.eth:door-001';
 export const gateEResourceId = keccak256(stringToHex(gateEResourceName));
 
 const proofPattern = /^PROOF=(0x[0-9a-fA-F]{130})$/;
+const firmwareAuthorizationPattern = /^AUTHORIZATION: (ALLOW|DENY)$/;
+
+export class GateESerialFinalizationError extends Error {
+  constructor(reason, message, details = {}) {
+    super(message);
+    this.name = 'GateESerialFinalizationError';
+    this.reason = reason;
+    Object.assign(this, details);
+  }
+}
 
 export function serializeChallenge(challenge) {
   const payload = concatHex([
@@ -41,6 +51,7 @@ export class GateESecureBridge {
     sendLine,
     checkReplay = false,
     proofTimeoutMs = 30_000,
+    firmwareConfirmationTimeoutMs = 2_000,
     setTimer = setTimeout,
     clearTimer = clearTimeout,
   }) {
@@ -49,19 +60,44 @@ export class GateESecureBridge {
     this.sendLine = sendLine;
     this.checkReplay = checkReplay;
     this.proofTimeoutMs = proofTimeoutMs;
+    this.firmwareConfirmationTimeoutMs = firmwareConfirmationTimeoutMs;
     this.setTimer = setTimer;
     this.clearTimer = clearTimer;
     this.state = 'AWAITING_TARGET_ACTIVATION';
     this.challenge = undefined;
     this.result = undefined;
     this.replayResult = undefined;
+    this.authorizationCommand = undefined;
+    this.expectedFirmwareConfirmation = undefined;
+    this.firmwareConfirmation = undefined;
     this.timer = undefined;
-    this.completion = new Promise(resolve => { this.resolveCompletion = resolve; });
+    this.completion = new Promise((resolve, reject) => {
+      this.resolveCompletion = resolve;
+      this.rejectCompletion = reject;
+    });
   }
 
   async receiveLine(rawLine) {
     const line = rawLine.replace(/\r$/, '');
     if (this.state === 'DONE') return;
+
+    if (this.state === 'AWAITING_FIRMWARE_CONFIRMATION') {
+      const authorization = firmwareAuthorizationPattern.exec(line)?.[1];
+      if (!authorization) return;
+      if (line !== this.expectedFirmwareConfirmation) {
+        this.failFinalization(
+          'FIRMWARE_AUTHORIZATION_MISMATCH',
+          `Firmware authorization mismatch: expected ${this.expectedFirmwareConfirmation}, received ${line}.`,
+          { observedFirmwareConfirmation: line },
+        );
+        return;
+      }
+      this.clearTimer(this.timer);
+      this.firmwareConfirmation = line;
+      this.state = 'DONE';
+      this.resolveCompletion(this.result);
+      return;
+    }
 
     if (line === 'TARGET_ACTIVATION: PASS' && this.state === 'AWAITING_TARGET_ACTIVATION') {
       this.state = 'AWAITING_SELECT';
@@ -117,19 +153,49 @@ export class GateESecureBridge {
 
   async failClosed(reason = 'BRIDGE_ERROR') {
     if (this.state === 'DONE') return;
+    if (this.state === 'AWAITING_FIRMWARE_CONFIRMATION') {
+      this.failFinalization(reason, `Serial finalization failed after ${this.authorizationCommand} was sent.`);
+      return;
+    }
+    if (this.state === 'SENDING_AUTHORIZATION') return;
     this.clearTimer(this.timer);
     this.result = { allowed: false, reason };
     await this.finish(this.result);
   }
 
   async finish(result) {
-    if (this.state === 'DONE') return;
-    this.state = 'DONE';
+    if (['DONE', 'SENDING_AUTHORIZATION', 'AWAITING_FIRMWARE_CONFIRMATION'].includes(this.state)) return;
+    const decision = result.allowed ? 'ALLOW' : 'DENY';
+    this.authorizationCommand = `AUTHORIZATION=${decision}`;
+    this.expectedFirmwareConfirmation = `AUTHORIZATION: ${decision}`;
+    this.state = 'SENDING_AUTHORIZATION';
     try {
-      await this.sendLine(`AUTHORIZATION=${result.allowed ? 'ALLOW' : 'DENY'}`);
-    } finally {
-      this.resolveCompletion(result);
+      await this.sendLine(this.authorizationCommand);
+    } catch {
+      this.failFinalization(
+        'AUTHORIZATION_WRITE_ERROR',
+        `Failed to send ${this.authorizationCommand}; firmware confirmation was not observed.`,
+      );
+      return;
     }
+    this.state = 'AWAITING_FIRMWARE_CONFIRMATION';
+    this.timer = this.setTimer(() => {
+      this.failFinalization(
+        'FIRMWARE_CONFIRMATION_TIMEOUT',
+        `Authorization command ${this.authorizationCommand} was sent but firmware confirmation was not observed.`,
+      );
+    }, this.firmwareConfirmationTimeoutMs);
+  }
+
+  failFinalization(reason, message, details = {}) {
+    if (this.state === 'DONE') return;
+    this.clearTimer(this.timer);
+    this.state = 'DONE';
+    this.rejectCompletion(new GateESerialFinalizationError(reason, message, {
+      authorizationCommand: this.authorizationCommand,
+      expectedFirmwareConfirmation: this.expectedFirmwareConfirmation,
+      ...details,
+    }));
   }
 
   waitForCompletion() {
@@ -163,6 +229,14 @@ function writeLine(port, line) {
 function closePort(port) {
   if (!port?.isOpen) return Promise.resolve();
   return new Promise((resolve, reject) => port.close(error => error ? reject(error) : resolve()));
+}
+
+export async function waitForBridgeAndClose(bridge, close) {
+  try {
+    return await bridge.waitForCompletion();
+  } finally {
+    await close();
+  }
 }
 
 export async function main(args = process.argv.slice(2)) {
@@ -227,24 +301,23 @@ export async function main(args = process.argv.slice(2)) {
   console.log(`CREDENTIAL: ${gateECredential.name}`);
   console.log(`RESOURCE: ${gateEResourceName}`);
   console.log(`RESOURCE_ID: ${gateEResourceId}`);
-  try {
-    const result = await bridge.waitForCompletion();
-    console.log(`VERIFICATION: ${result.reason}`);
-    console.log(`AUTHORIZATION: ${result.allowed ? 'ALLOW' : 'DENY'}`);
-    if (options.checkReplay) {
-      console.log(`REPLAY: ${bridge.replayResult?.reason ?? 'NOT_CHECKED'}`);
-    }
-  } finally {
+  const result = await waitForBridgeAndClose(bridge, async () => {
     port.off('data', receive);
     port.off('error', serialFailure);
     port.off('close', serialFailure);
     await closePort(port);
+  });
+  console.log(`VERIFICATION: ${result.reason}`);
+  console.log(`AUTHORIZATION: ${result.allowed ? 'ALLOW' : 'DENY'}`);
+  if (options.checkReplay) {
+    console.log(`REPLAY: ${bridge.replayResult?.reason ?? 'NOT_CHECKED'}`);
   }
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  main().catch(() => {
-    console.error('Gate E secure bridge stopped. AUTHORIZATION: DENY');
+  main().catch(error => {
+    const reason = error instanceof GateESerialFinalizationError ? ` (${error.reason})` : '';
+    console.error(`Gate E secure bridge stopped${reason}. AUTHORIZATION: DENY`);
     process.exitCode = 1;
   });
 }
