@@ -175,3 +175,15 @@ No product code has been written yet.
 - Fresh validation passed Node 134/134, scoped Gate E 42/42, Android 21/21 plus debug assembly, and Gate E firmware compilation. Android source, Gate A, Gate D, APDU v1, and established `cred-001` behavior remained unchanged.
 - GATE E INACTIVE PHYSICAL: PASS. GATE E ACTIVE PHYSICAL: PENDING. This checkpoint performed zero blockchain writes and zero physical NFC attempts.
 
+### Gate E ACTIVE end-to-end physical validation
+
+- Renewed only `guest-001` validity while it remained INACTIVE in transaction `0xecbf343cc3c6a26a599bc46c789d273e33354b950767765c27b4dba0b0508e4e` at nonce 20. The write preserved credential identity and `cred-001`, setting `access.validUntil = 1793487599` (2026-10-31 23:59:59 Europe/Madrid).
+- Activated `guest-001` in transaction `0xafd5cb1c2ebe849ff65ed934ab2fb9da5eb1fe2df40370c3b1d43b25b97fa506` at nonce 21. The write preserved the renewed deadline and produced authoritative ACTIVE/ALLOW policy.
+- Flashed the committed Batch A firmware, including public `GATE_E: STOP - <STAGE>: <PUBLIC_REASON>` telemetry before firmware-local DENY, and verified a complete cold boot: all power removed, CH343 disappearance observed, approximately ten seconds unpowered, established CH343/COM4 reconnected, and one RST/EN press required after passive capture produced no output. I2C `0x24` ACK, PN532 query PASS/version 1.6, `GATE_E_READY`, and `PRESENT_SEEKER` followed.
+- Completed one controlled physical ACTIVE attempt. TARGET activation and SELECT passed; Node issued exactly one fresh Gate A challenge for `guest-001.demo-access.eth` and `demo-access.eth:door-001`; one 104-byte payload traversed HCE/ISO-DEP; Android progressed `PROCESSING -> READY`; GET_SIGNATURE returned one 65-byte proof whose raw value remained redacted.
+- Gate A recovered `0x3419148731087b970d2059C53780163B452D5FF7`, matched the current ENS owner, consumed the challenge, and evaluated a fresh coherent PRIMARY-provider snapshot as `VERIFIER_ALLOW` inside the Batch A freshness and deadline budgets. No fallback RPC was configured.
+- Node wrote `AUTHORIZATION=ALLOW` exactly once. Firmware subsequently emitted the matching `AUTHORIZATION: ALLOW`; the controller result was `CONTROLLER_CONFIRMED`, and serial closed only after confirmation.
+- The same consumed proof returned `REPLAYED_CHALLENGE` / DENY in the same process with zero new challenges, NFC operations, signatures, ENS reads, or blockchain writes.
+- The physical ACTIVE run itself performed zero blockchain writes. DEV nonce remained 22/22 with no pending transaction; `guest-001` remained ACTIVE/ALLOW and `cred-001` identity remained intact.
+- Technical lessons: physical authorization is not proven until controller confirmation; ACTIVE policy alone is not holder possession; NFC transports proof while Node performs blockchain authorization; whole-snapshot freshness and attempt deadlines reject stale or late ALLOW; full cold boot is currently an operational reliability measure, not a proven fix for intermittent PN532/I2C/ISO-DEP failures.
+

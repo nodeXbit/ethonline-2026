@@ -7,7 +7,7 @@
 - Core flow: an operator activates or deactivates access in the browser; the local Node server updates PermissionedResolver `access.v1` on Sepolia; a user presents a fresh wallet-signed proof through Android HCE and the ESP32/PN532; the secure bridge verifies current holder control and reads the same authoritative ENSv2 state to produce an access decision.
 - Primary sponsor: ENS / ENSv2.
 - MVP: one end-to-end Sepolia vertical slice demonstrating ENSv2-authoritative credential state and a physical ISO14443A NFC interaction through the ESP32-S3 and PN532.
-- Verified architecture: browser demo -> local Node server -> ENSv2 PermissionedResolver `access.v1` -> persistent UserRegistry credential; and fresh Node challenge -> ESP32/PN532 -> Android HCE/Privy proof -> Node Gate A verification -> coherent current ENSv2 read -> one serial authorization command -> matching firmware confirmation. Gate E INACTIVE/DENY is physically verified; ACTIVE/ALLOW remains pending.
+- Verified architecture: browser demo -> local Node server -> ENSv2 PermissionedResolver `access.v1` -> persistent UserRegistry credential; and fresh Node challenge -> ESP32/PN532 -> Android HCE/Privy proof -> Node Gate A verification -> coherent current ENSv2 read -> one serial authorization command -> matching firmware confirmation. Gate E is physically verified end to end for both INACTIVE/DENY and ACTIVE/ALLOW, including controller confirmation and consumed-proof replay denial.
 - Verified lifecycle: the same NFC tag produced `DENY → ALLOW → DENY` while the credential remained REGISTERED with unchanged owner, tokenId, resolver, and registry expiry.
 - Future layers: presentation/collectible behavior, dynamic metadata, loyalty, transferability, and programmable benefits may build on the persistent credential, but none is implemented yet.
 - Non-goals: production-grade access control, complex infrastructure, multiple superficial sponsor integrations, and unrelated Hermes/Knowledge OS work.
@@ -24,7 +24,7 @@
 
 ## Security upgrade direction
 
-The fresh cryptographic holder-proof architecture and physical Gate E INACTIVE/DENY path are verified. Explicit renew-inactive tooling and deterministic Gate E timing, serial, and coherent-snapshot bounds are implemented and locally validated; no live guest renewal has been executed. The immediate objective is a read-only `guest-001` renewal preflight, followed only with explicit Control Tower authorization by at most one resolver `setData` write. Physical ACTIVE/ALLOW remains the next unproven Gate E result.
+The fresh cryptographic holder-proof architecture and physical Gate E INACTIVE/DENY and ACTIVE/ALLOW paths are verified. `guest-001.demo-access.eth` is the canonical secure demo credential, with validity renewed through 2026-10-31 23:59:59 Europe/Madrid and current ACTIVE/ALLOW policy. Deterministic Gate E timing, serial, coherent-snapshot, replay, and controller-confirmation bounds remain required. The immediate objective is Batch B — Demo Reliability.
 
 Implemented local composition:
 
@@ -45,7 +45,7 @@ High-value layers already identified, but not yet implemented:
 
 - Further Privy onboarding/product UX beyond the implemented embedded-wallet signer.
 - Real USDC credential-issuance payment flow.
-- Physical validation of the remaining Gate E ACTIVE/ALLOW path.
+- Sub-two-minute deterministic pre-demo health checking and controlled Gate E repeatability/revocation rehearsal.
 - Dynamic credential branding/metadata.
 - Credential transferability.
 - World Selfie Check before issuance/activation.

@@ -550,10 +550,9 @@ The first successful physical Gate E INACTIVE authorization proved the entire cr
 ### Consequences
 
 - Gate E INACTIVE physical authorization is proven end to end, including controller receipt: PASS.
-- Gate E ACTIVE physical authorization remains unproven: PENDING.
+- Gate E ACTIVE physical authorization was still pending at this checkpoint; D-019 records its later end-to-end PASS.
 - Firmware, Android, APDU v1, Gate A, and ENS authorization semantics remain unchanged.
-- `guest-001` remains REGISTERED and INACTIVE; the validation used zero blockchain writes and did not use NFC UID.
-- The immediate P0 is safe renewal of the existing REGISTERED INACTIVE record before `access.validUntil = 1789107864` (2026-09-11 08:24:24 Europe/Madrid). Current tooling cannot perform that renewal while preserving INACTIVE safely.
+- `guest-001` remained REGISTERED and INACTIVE during this validation; the run used zero blockchain writes and did not use NFC UID. D-019 records the later authorized renewal, activation, and ACTIVE physical validation.
 
 ### Revisit when
 
@@ -587,8 +586,43 @@ Explicit renewal prevents an administrative validity change from being coupled a
 - Late proof, late ENS completion, or a computed ALLOW that reaches the deadline cannot authorize or be sent to firmware.
 - A failed primary snapshot is discarded in full before the optional fallback begins.
 - Read-only renewal preflight may read and simulate but cannot broadcast or enter post-broadcast recovery.
-- Gate E INACTIVE physical remains PASS; Gate E ACTIVE physical remains PENDING and is not claimed by this decision.
+- Gate E INACTIVE physical was PASS and ACTIVE remained pending at this checkpoint; D-019 records the later ACTIVE end-to-end PASS without changing these bounds.
 
 ### Revisit when
 
 Measured end-to-end behavior provides evidence that a bound must change without weakening fail-closed, whole-snapshot, or one-shot semantics.
+
+---
+
+## D-019 — Close Gate E secure authorization and move to demo reliability
+
+**Status:** Accepted
+**Date:** 2026-09-10
+
+### Decision
+
+Treat Gate E secure authorization as technically closed after physical validation of valid-holder INACTIVE/DENY, valid-holder ACTIVE/ALLOW, exact controller confirmation, and consumed-proof replay DENY.
+
+Use `guest-001.demo-access.eth` as the canonical secure demo credential. Preserve its owner `0x3419148731087b970d2059C53780163B452D5FF7`, expected resolver, and renewed validity horizon of 2026-10-31 23:59:59 Europe/Madrid. Keep static NFC UID excluded from authorization.
+
+Retain all Batch A timing, freshness, public firmware STOP, proof-redaction, one-shot, controller-confirmation, and replay-rejection requirements. Require a full cold boot before a physical Gate E session using the established CH343/PN532 readiness sequence. This is an operational reliability measure and not a claim about the root cause of intermittent hardware failures.
+
+Do not redesign APDU v1, adopt PC/SC, change the installed PN532 library, or expand the secure protocol without new concrete evidence. The next work is Batch B — Demo Reliability.
+
+### Why
+
+One controlled physical ACTIVE attempt transported a fresh 104-byte challenge and redacted 65-byte Privy proof through Android HCE / ISO-DEP / PN532 / ESP32. Gate A recovered the current ENS owner, consumed the challenge, and a fresh coherent PRIMARY-provider ENSv2 snapshot returned `VERIFIER_ALLOW`. Node sent `AUTHORIZATION=ALLOW` once, firmware later emitted the exact matching `AUTHORIZATION: ALLOW`, and the same consumed proof was rejected as `REPLAYED_CHALLENGE` without another physical or chain operation.
+
+### Consequences
+
+- Gate E secure path: PASS. Batch A: PASS.
+- Physical success continues to require exact controller confirmation; Node's policy result alone is insufficient.
+- The prototype trusts its local Node/USB/controller environment and makes no relay-resistance or production hardware-security claim.
+- No physical lock or relay actuator is part of the validated path.
+- Intermittent PN532/I2C/ISO-DEP failures remain an operational risk; controlled setup and full cold boot are the current mitigation.
+- The successful ACTIVE run used PRIMARY RPC with no fallback configured.
+- Demo reliability, outcome clarity, runbook quality, and controlled rehearsal now take priority over secure-protocol expansion.
+
+### Revisit when
+
+New reproducible evidence requires a security or transport change, or a production controller/actuator replaces the current prototype boundary.

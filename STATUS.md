@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Preserve the completed Gate E INACTIVE physical validation and run a read-only renewal preflight for the existing REGISTERED INACTIVE `guest-001` record before seeking explicit Control Tower authorization for at most one resolver `setData` write.
+BATCH B — DEMO RELIABILITY: create a sub-two-minute deterministic pre-demo health check, align the demo with `guest-001`, distinguish POLICY / VERIFIER / CONTROLLER outcomes, preserve proof redaction, maintain the full-cold-boot runbook, and rehearse controlled repeatability/revocation.
 
 ## Done
 - ChatGPT Project configured
@@ -50,14 +50,17 @@ Preserve the completed Gate E INACTIVE physical validation and run a read-only r
 - The separate Gate E firmware is fail-closed and one-shot. Credential label/owner parameters support a second credential without changing the existing `cred-001` defaults.
 - Gate E serial finalization now requires the exact matching firmware result after Node sends one `AUTHORIZATION=ALLOW` or `AUTHORIZATION=DENY`; the opposite result and a two-second confirmation timeout fail closed, and serial closes only after successful confirmation or terminal failure.
 - Gate E local validation passes Node 104/104, Gate E 20/20, Android 21/21 plus debug assembly, and Gate E firmware compilation. Android production code, firmware, APDU v1, Gate A semantics, and ENS semantics remain unchanged.
-- `guest-001.demo-access.eth` is REGISTERED to `0x3419148731087b970d2059C53780163B452D5FF7` with INACTIVE `access.v1`. Provisioning completed previously through `setData` transaction `0x34c47584a377bf6d77428d19a946a322d9d31fb040caf2bf40dc205bf97112bf` and `register` transaction `0x964e488bb056b86a72870251a46e91f569f4915fc102f2aeb573b71ae202f5da`.
+- `guest-001.demo-access.eth` is REGISTERED to `0x3419148731087b970d2059C53780163B452D5FF7` with resolver `0x0B723c0C2170F2ea508F2f4e3e122C6c0782744C`, token/resource `9797450251103362342421957848157950028437726839506502066019935098029798850560`, registry expiry `1820557476`, and ACTIVE `access.v1` through `1793487599` (2026-10-31 23:59:59 Europe/Madrid).
 - GATE E INACTIVE PHYSICAL: PASS. One fresh physical proof produced `ACCESS_DENIED`; Node sent `AUTHORIZATION=DENY` exactly once and captured firmware `AUTHORIZATION: DENY` before closing COM4. Reuse of the same proof produced `REPLAYED_CHALLENGE` / DENY without new NFC, signing, challenge issuance, ENS read, or blockchain write. UID was unused.
-- GATE E ACTIVE PHYSICAL: PENDING.
+- Completed the authorized guest-only validity renewal in transaction `0xecbf343cc3c6a26a599bc46c789d273e33354b950767765c27b4dba0b0508e4e` at nonce 20. It preserved `active=false`, extended `validUntil` to `1793487599`, and did not change `guest-001` identity or `cred-001`.
+- Completed the authorized activation in transaction `0xafd5cb1c2ebe849ff65ed934ab2fb9da5eb1fe2df40370c3b1d43b25b97fa506` at nonce 21. It preserved the renewed validity deadline and produced authoritative ACTIVE/ALLOW policy.
+- GATE E ACTIVE END-TO-END: PASS. One fresh physical EIP-712 proof recovered the current `guest-001` owner, consumed the challenge, evaluated a fresh coherent PRIMARY-provider snapshot as `VERIFIER_ALLOW`, sent `AUTHORIZATION=ALLOW` exactly once, captured the later matching firmware `AUTHORIZATION: ALLOW`, and closed serial only after `CONTROLLER_CONFIRMED`.
+- GATE E SECURE PATH: PASS. Valid holder + INACTIVE produces physical DENY; valid holder + ACTIVE produces physical ALLOW; consumed-proof replay produces DENY. Static NFC UID has no authorization role.
 - BATCH A — DETERMINISTIC READINESS: PASS. Added explicit scoped renew-inactive tooling, semantic no-op when validity is already sufficient, and ACTIVE renewal refusal without changing activation/deactivation semantics.
 - Gate E now enforces a 50-second post-challenge total attempt deadline, an eight-second complete ENS verification budget, a two-second controller confirmation deadline, a 1,024-byte serial input bound, immediate terminal firmware STOP handling, and redacted physical-proof logging.
 - Coherent ENS authorization now accepts blocks at most 60 seconds old with at most 15 seconds of future skew and may use one optional fallback only by restarting the complete `readCredential` snapshot; provider reads are never mixed within a snapshot.
 - Batch A validation passed Node 134/134, scoped Gate E 42/42, Android 21/21 plus debug assembly, and Gate E firmware compilation.
-- No live `guest-001` renewal has been executed.
+- BATCH A — DETERMINISTIC READINESS: PASS, including the committed firmware flash and verified complete cold boot. The current pre-session runbook is full power removal, observed CH343 disappearance, approximately ten seconds unpowered, reconnect the established CH343 path, and one RST/EN press only when natural boot output is absent; require I2C `0x24` ACK, PN532 firmware query PASS/version 1.6, `GATE_E_READY`, and `PRESENT_SEEKER`.
 
 ## Sponsor / architecture delta
 
@@ -78,14 +81,12 @@ Preserve the completed Gate E INACTIVE physical validation and run a read-only r
 
 ## Next
 
-1. Run the read-only renewal preflight for `guest-001`.
-2. After explicit Control Tower authorization, permit at most one resolver `setData` write to renew the still-INACTIVE record.
-3. Separately, after explicit authorization, validate the still-unproven ACTIVE physical ALLOW path with a fresh proof while keeping `cred-001`, NFC UID exclusion, APDU v1, and the one-shot Gate E session model unchanged.
+1. Build a sub-two-minute deterministic pre-demo health check.
+2. Align the demo with canonical secure credential `guest-001` and clearly distinguish POLICY / VERIFIER / CONTROLLER results while preserving proof redaction.
+3. Maintain the operational cold-boot runbook and rehearse controlled repeatability/revocation without expanding the secure protocol.
 
 ## Blockers
 
-- The safe renew-inactive tooling is implemented and validated locally, but its read-only `guest-001` preflight and any separately authorized resolver write have not yet been executed.
-- Gate E ACTIVE/ALLOW physical validation remains pending explicit authorization after the validity risk is handled.
 - World Selfie Check sandbox/access is an external dependency only if World is selected as a secondary sponsor.
 
 ## Risks
@@ -97,7 +98,9 @@ Preserve the completed Gate E INACTIVE physical validation and run a read-only r
 - ENSv2 must remain central and authoritative rather than becoming a cosmetic sponsor integration.
 - The ENSv2 credential tokenId/resource can be mutable across unregister; the logical ENS name/label is the stable application reference.
 - Demo video, public deployment, README, and submission polish cannot be deferred to the final hours.
-- The completed slice is a prototype and does not claim production security.
+- The completed slice is a prototype that trusts the local Node/USB/controller environment. It makes no relay-resistance or production hardware-security claim, and no physical lock/relay actuator is part of the validated path.
+- Physical hardware has shown intermittent PN532/I2C/ISO-DEP failures. Controlled setup and a full cold boot are the current operational mitigation, not a proven root-cause fix.
+- RPC fallback remains optional; the successful ACTIVE run used PRIMARY RPC with no fallback configured.
 
 ## Latest validation
 
@@ -182,17 +185,16 @@ ESP32-S3 + Elechouse PN532 initiator
 
 The unchanged APDU v1 implementation passed 2/2 complete physical sessions. Full-size 67-byte responses fit the validated transport without chunking. An earlier GET_SIGNATURE failure was not reproduced and remains classified as transient rather than justification for a speculative PN532/HAL workaround.
 
-Gate D proves physical cryptographic proof transport. Gate E now additionally proves the INACTIVE ENS authorization path:
+Gate D proves physical cryptographic proof transport. Gate E now proves the complete secure authorization path for both current policy outcomes:
 
 ```text
 one fresh physical Gate A proof
   -> recovered signer equals current guest-001 ENS owner
   -> challenge consumed
-  -> current access.active == false
-  -> ACCESS_DENIED
-  -> one AUTHORIZATION=DENY command
-  -> matching firmware AUTHORIZATION: DENY captured before serial close
+  -> coherent current ENSv2 policy
+  -> INACTIVE: one AUTHORIZATION=DENY command and matching firmware confirmation
+  -> ACTIVE: one AUTHORIZATION=ALLOW command and matching firmware confirmation
   -> same-proof replay REPLAYED_CHALLENGE / DENY
 ```
 
-The controlled run used one 104-byte challenge transport, one SEND_CHALLENGE, `PROCESSING -> READY`, one successful GET_SIGNATURE, and one 65-byte proof. It performed zero blockchain writes and did not use NFC UID. The ACTIVE/ALLOW physical path has not yet been proven.
+The controlled ACTIVE run used one 104-byte challenge transport, one SEND_CHALLENGE, `PROCESSING -> READY`, one successful GET_SIGNATURE, and one redacted 65-byte proof. The verifier recovered `0x3419148731087b970d2059C53780163B452D5FF7`, matched the current ENS owner, returned `VERIFIER_ALLOW` inside the Batch A budgets, and the controller confirmed `AUTHORIZATION: ALLOW`. The same consumed proof returned `REPLAYED_CHALLENGE` / DENY with zero new challenge, NFC operation, signature, ENS read, or blockchain write. Pre- and post-run DEV nonces remained 22/22; `guest-001` remained ACTIVE/ALLOW and `cred-001` remained intact.
