@@ -124,3 +124,15 @@ No product code has been written yet.
 - No PN532 exchange occurred during Gate C2. Real phone-to-PN532 interoperability remains Gate D.
 - Technical learning: asynchronous cryptographic signing and NFC transport are separated by the HCE state machine. SEND_CHALLENGE does not wait for network signing; the reader polls GET_STATUS until READY.
 
+### Physical PN532/HCE transport Gate D milestone
+
+- Added one-shot ESP32-S3 firmware using the exact installed Elechouse-compatible `PN532` / `PN532_I2C` stack over I2C on SDA GPIO17, SCL GPIO18, address `0x24`, with Serial0 at 115200 and PN532 firmware 1.6.
+- Activated the Seeker as a real ISO14443A/ISO-DEP target and selected proprietary AID `F0454E5356324331`.
+- Transported the exact deterministic Gate C2 104-byte binary challenge, observed asynchronous Privy signing through `PROCESSING -> READY`, and retrieved the exact 65-byte signature plus `9000`.
+- Node/viem recovered `0x3419148731087b970d2059C53780163B452D5FF7`, matching the embedded Privy wallet in both successful physical sessions.
+- Completed 2/2 full physical sessions with SEND_CHALLENGE sent once per session. The full 67-byte response is physically viable and no signature chunking is required.
+- An earlier GET_SIGNATURE exchange failed once. Android telemetry later proved receipt in READY and production of 67 bytes ending `9000`; the unchanged firmware then succeeded twice, so the failure is classified transient/not reproduced.
+- Temporary Android capability and transport telemetry was reverted after diagnosis; production Gate C1/C2 behavior and APDU v1 remain unchanged.
+- Final validation passed firmware compilation, Android 21/21 JVM tests and debug assembly, and Node 83/83.
+- Technical learning: do not redesign a protocol around one transient hardware failure. Instrument the failing boundary first; successful full-size reproduction proved the transport itself was viable.
+

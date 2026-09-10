@@ -457,3 +457,36 @@ Keeping session ownership application-scoped avoids competing Privy instances or
 ### Revisit when
 
 Only if Android process behavior or physical reader interoperability demonstrates that the shared application-scoped architecture cannot preserve the frozen APDU contract.
+
+---
+
+## D-015 â€” Gate D keeps the ESP32 as one-shot NFC/APDU transport
+
+**Status:** Accepted
+**Date:** 2026-09-10
+
+### Decision
+
+Use the installed Elechouse-compatible `PN532` / `PN532_I2C` stack for Gate D and keep Gate C APDU v1 frozen. The validated 104-byte challenge and 65-byte proof fit the physical transport, so signature chunking is not required for this prototype.
+
+The ESP32 remains NFC/APDU transport only at this stage. Privy signing stays on Android, and Node remains the future verifier and onchain reader. NFC UID is excluded from secure authorization.
+
+Gate D firmware is deliberately one-shot and requires reset before another signing session, preventing accidental repeated signatures while a phone remains on the antenna.
+
+### Why
+
+Two complete ESP32-S3 + PN532 + Seeker ISO-DEP sessions transported a real Privy-produced 65-byte Gate A-compatible signature, and Node recovered the same embedded wallet. The unchanged implementation successfully carried the full 67-byte response twice without chunking.
+
+One earlier GET_SIGNATURE failure was transient and not reproduced. A speculative PN532/HAL workaround is not accepted without a reproducible failure and stronger low-level evidence.
+
+### Consequences
+
+- Preserve APDU v1 and the installed PN532 libraries.
+- Do not add chunking for the current challenge/proof sizes.
+- Keep ENS/RPC/blockchain authorization outside the ESP32 transport layer for Gate D.
+- Gate D proves physical proof transport, not ENS-based physical authorization.
+- Gate E must compose a fresh verifier-issued Gate A challenge with current ENSv2 ownership and `access.v1` authorization.
+
+### Revisit when
+
+A reproducible physical transport limitation produces specific evidence that the current contract cannot be carried safely.

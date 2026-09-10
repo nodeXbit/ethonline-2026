@@ -2,9 +2,9 @@
 
 ## Current objective
 
-Gate D: implement the smallest ESP32-S3 + Elechouse PN532 initiator/APDU path and prove a real physical SELECT / SEND_CHALLENGE / GET_STATUS / GET_SIGNATURE exchange with the Seeker `HostApduService`.
+Gate E: replace the deterministic Gate D transport vector with a fresh server-issued Gate A challenge and compose the physically transported holder proof with current ENSv2 ownership and `access.v1` authorization to produce physical `ALLOW` / `DENY`.
 
-Gate D must preserve APDU v1 and must not introduce blockchain or ENS authorization yet.
+Gate E must keep NFC UID outside secure authorization and preserve the frozen APDU v1 contract.
 
 ## Done
 - ChatGPT Project configured
@@ -41,6 +41,12 @@ Gate D must preserve APDU v1 and must not introduce blockchain or ENS authorizat
 - Gate C2 reconstructs the exact Gate A `ENSv2 Access` EIP-712 typed data from the binary `HceChallenge`, schedules `eth_signTypedData_v4` asynchronously, and preserves C1 stale-completion invalidation and the exact 65-byte proof contract.
 - The production manual APDU harness passed on the Seeker. Privy wallet `0x3419148731087b970d2059C53780163B452D5FF7` produced a 65-byte proof, and Node recovered the same address (`MATCH: PASS`).
 - Gate C2 validation passed all 21 Android JVM tests, Android debug assembly, and the complete 83-test Node suite.
+- Physical PN532/HCE transport Gate D: PASS. A real ESP32-S3 using the installed Elechouse-compatible `PN532` / `PN532_I2C` stack completed ISO-DEP/APDU exchange with the Seeker `HostApduService`.
+- TARGET, SELECT, SEND_CHALLENGE, PROCESSING, READY, and GET_SIGNATURE were physically validated with the frozen APDU v1 contract and deterministic 104-byte Gate C2 transport vector.
+- The PN532 retrieved the real 65-byte Privy-produced Gate A-compatible signature, and Node/viem recovered the same embedded wallet `0x3419148731087b970d2059C53780163B452D5FF7` (`MATCH: PASS`).
+- Gate D passed 2/2 complete physical sessions. The earlier GET_SIGNATURE failure is classified as transient/not reproduced after the unchanged implementation transported the full 67-byte response twice.
+- Gate D requires no chunking. Final validation passed Node 83/83, Android 21/21, Android debug assembly, and firmware compilation.
+- Gate D proves physical cryptographic proof transport. It does not yet prove ENS-based physical authorization.
 
 ## Sponsor / architecture delta
 
@@ -61,15 +67,14 @@ Gate D must preserve APDU v1 and must not introduce blockchain or ENS authorizat
 
 ## Next
 
-1. Implement the minimal ESP32-S3 + Elechouse PN532 initiator/APDU path for Gate D.
-2. Prove a real SELECT / SEND_CHALLENGE / GET_STATUS / GET_SIGNATURE exchange with the Seeker.
-3. Preserve the frozen Gate C APDU v1 contract.
-4. Do not add blockchain/ENS authorization yet, and keep static NFC UID outside secure authorization.
+1. Implement Gate E with a fresh verifier-issued Gate A challenge.
+2. Transport the resulting holder proof through the proven Gate D PN532/HCE path.
+3. Evaluate current ENSv2 ownership and `access.v1` to produce physical `ALLOW` / `DENY`.
+4. Keep static NFC UID outside secure authorization and preserve APDU v1.
 
 ## Blockers
 
-- Transport of the proven wallet signature over the physical NFC/HCE path is not yet validated.
-- Gate C2 proves real Privy signing through the production HCE processor/provider path, but real phone-to-PN532 APDU interoperability and physical cryptographic authorization remain unproven.
+- Physical proof transport is complete; composition with a fresh Gate A challenge and current ENSv2 authorization remains unimplemented.
 - World Selfie Check sandbox/access is an external dependency only if World is selected as a secondary sponsor.
 
 ## Risks
@@ -150,4 +155,20 @@ manual APDU harness
 
 On the Seeker, public wallet `0x3419148731087b970d2059C53780163B452D5FF7` matched the recovered signer. Android passed 21/21 JVM tests and `assembleDebug`; Node passed 83/83 tests. The real signature is not stored in the repository.
 
-Gate C2 proves real Privy signing through the production HCE processor/provider path. It does not yet prove actual phone-to-PN532 NFC interoperability, physical cryptographic access, or ENS credential ownership by the Privy wallet.
+Gate C2 proves real Privy signing through the production HCE processor/provider path. Gate D now additionally proves actual phone-to-PN532 NFC interoperability and physical transport of that cryptographic proof; ENS credential ownership and access authorization are not yet composed into this physical path.
+
+Gate D proves the complete transport-only path:
+
+```text
+ESP32-S3 + Elechouse PN532 initiator
+  -> real ISO-DEP target activation
+  -> SELECT F0454E5356324331
+  -> deterministic 104-byte Gate C2 challenge
+  -> Android PROCESSING / READY
+  -> real Privy 65-byte EIP-712 signature + 9000
+  -> Node/viem recovered signer match
+```
+
+The unchanged APDU v1 implementation passed 2/2 complete physical sessions. Full-size 67-byte responses fit the validated transport without chunking. An earlier GET_SIGNATURE failure was not reproduced and remains classified as transient rather than justification for a speculative PN532/HAL workaround.
+
+Gate D proves physical cryptographic proof transport. It does not yet prove ENS-based physical authorization.
