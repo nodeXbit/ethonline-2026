@@ -1,0 +1,6 @@
+# Copy this file to privy.local.properties and replace the placeholders.
+# Find the App ID under Privy Dashboard > App Settings > Basics.
+# Find the mobile App Client ID under Privy Dashboard > App Settings > Clients.
+# Never put an App Secret in this file.
+PRIVY_APP_ID=your-privy-app-id
+PRIVY_APP_CLIENT_ID=your-privy-mobile-app-client-id
