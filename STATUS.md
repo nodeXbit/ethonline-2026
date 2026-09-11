@@ -2,7 +2,20 @@
 
 ## Current objective
 
-LIVE DEMO REHEARSAL: execute the controlled plan in `DEMO_RUNBOOK.md` only in the next authorized session. No physical rehearsal has yet been executed with the finalized Batch B UX.
+MOBILE ISSUER ADMISSION is closed. The next architecture target, not yet authorized for execution, is the isolated issuer namespace `keys.demo-access.eth` with R1 and S1. The existing `guest-001` physical fallback remains unchanged.
+
+## Mobile issuer admission checkpoint
+
+MOBILE ISSUER ADMISSION: PASS.
+
+- Dedicated Android issuer: `0xFa90e8301A22833B74378C5fA3a7c120Ac512685`.
+- Funding transaction: `0x388a8817a207ebeea6cfc4e2d7d3573f97522cebc31c44d866ad63cd0a929b53`.
+- M1 zero-value Sepolia transaction: `0x6c4f42f2d368936d4aaf7edf3e0395c376f92b699563b34fee4ed053a0a53e32`, block `11683226`, nonce `0 -> 1`.
+- Physical mobile transaction transport: PASS. Persistent hash/restart recovery: PASS. Public read-only RPC reconciliation: PASS. The existing operation recovered to `CONFIRMED`; no second M1 transaction was sent.
+- Android is the primary credential-wallet and issuer surface. Privy remains responsible for authentication, embedded-wallet signing and writes; the allowlisted public Sepolia client handles Android blockchain reads.
+- The recoverable operation journal persists `SUBMITTING_NO_HASH` before provider submission, persists a returned hash immediately, never blindly retries an ambiguous submission, and requires nonce proof plus explicit re-arm after a proven no-broadcast result.
+- M1 performed no ENS writes. The established `guest-001` physical fallback, APDU v1, HCE, Node verifier and firmware remain unchanged.
+- Final validation: Node 163/163; Android 107/107; Android debug assembly and diff check PASS.
 
 ## Batch B checkpoint
 

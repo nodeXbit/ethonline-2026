@@ -658,3 +658,33 @@ The demo must make an onchain permission visibly different from proof of holder 
 ### Revisit when
 
 A concrete rehearsal regression or security issue requires a scoped correction. Do not reopen visual polish or protocol design without such evidence.
+
+---
+
+## D-021 — Separate Android wallet writes from public blockchain reads
+
+**Status:** Accepted
+**Date:** 2026-09-11
+
+### Decision
+
+Treat Android as the primary credential-wallet and issuer surface. Keep Privy responsible for authentication, the embedded wallet, `switchChain`, signing and wallet writes. Route Android blockchain reads through a separate credential-free HTTPS Sepolia client with an explicit read-method allowlist, bounded timeouts and response size, and sanitized errors.
+
+Use an operation-scoped persistent transaction journal for mobile writes. Persist `SUBMITTING_NO_HASH` before calling the wallet provider, persist a returned transaction hash immediately, never blindly retry after an ambiguous result, and permit re-arm only after unchanged latest/pending nonces prove no broadcast. Existing hashes must reconcile on restart without creating a new operation.
+
+### Why
+
+Privy Android 0.14.0 successfully signed and broadcast the physical M1 transaction but its generic response model could not deserialize object-valued transaction and receipt results. The separate public read client reconciled the existing hash to `CONFIRMED` on the physical device without another submission.
+
+### Consequences
+
+- Mobile issuer admission is closed: transaction transport, persistent recovery and read-only reconciliation are PASS.
+- M1 transaction `0x6c4f42f2d368936d4aaf7edf3e0395c376f92b699563b34fee4ed053a0a53e32` is confirmed in block `11683226`; issuer nonce advanced `0 -> 1`.
+- The read client cannot sign or expose `eth_sendTransaction` / `eth_sendRawTransaction`; wallet writes remain behind Privy and explicit human review.
+- No operator RPC credential is compiled into Android.
+- The existing `guest-001` physical fallback remains untouched.
+- The next architecture target is the isolated issuer namespace `keys.demo-access.eth` with R1 and S1. This decision does not authorize that work.
+
+### Revisit when
+
+A production RPC strategy, multi-chain requirement, or smart-wallet architecture requires a different read boundary without weakening transaction recovery guarantees.

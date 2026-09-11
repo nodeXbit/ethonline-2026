@@ -199,3 +199,15 @@ No product code has been written yet.
 - Batch B implementation/review used zero blockchain writes, zero NFC attempts and zero firmware flashes; no dependency installation or public deployment. The earlier authoritative read-only Batch B API observation was guest ACTIVE/ALLOW through `1793487599`; checkpoint review did not query or mutate onchain state.
 - BATCH B — DEMO RELIABILITY: PASS. Next objective: LIVE DEMO REHEARSAL. No physical rehearsal has yet been executed with the finalized Batch B UX; Batch B stays closed unless rehearsal reveals a real blocker.
 
+## 2026-09-11
+
+### Mobile issuer admission M1 closure
+
+- Funded dedicated Privy issuer `0xFa90e8301A22833B74378C5fA3a7c120Ac512685` in Sepolia transaction `0x388a8817a207ebeea6cfc4e2d7d3573f97522cebc31c44d866ad63cd0a929b53`.
+- Physically submitted exactly one zero-value M1 self-transaction: `0x6c4f42f2d368936d4aaf7edf3e0395c376f92b699563b34fee4ed053a0a53e32`, confirmed in block `11683226`; issuer nonce advanced from `0` to `1`.
+- Added an operation-scoped persistent transaction journal and explicit review/submission state machine. `SUBMITTING_NO_HASH` is durable before provider send, returned hashes are persisted immediately, ambiguous outcomes reconcile without blind resubmission, and re-arm requires read-only proof that no broadcast occurred.
+- Split Android provider responsibilities: Privy handles authentication, embedded-wallet signing, chain switching and writes; a credential-free HTTPS Sepolia client handles allowlisted scalar/object reads with bounded timeouts, bounded responses and sanitized errors.
+- The physical app restarted with the existing M1 hash, reconciled transaction/receipt/nonces through the public read client, and displayed `Confirmed`. No second M1 operation or transaction was created.
+- M1 transaction transport, persistent recovery and public read-only reconciliation: PASS. No ENS write, NFC run or firmware flash occurred during M1.
+- The existing `guest-001` physical fallback remains untouched. The next architecture target is the isolated `keys.demo-access.eth` namespace with R1 and S1; it was not started in this checkpoint.
+
