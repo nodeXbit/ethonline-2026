@@ -2,7 +2,7 @@
 
 ## Current objective
 
-MOBILE ISSUER ADMISSION is closed. The next architecture target, not yet authorized for execution, is the isolated issuer namespace `keys.demo-access.eth` with R1 and S1. The existing `guest-001` physical fallback remains unchanged.
+MOBILE ISSUER ADMISSION and the isolated ENSv2 issuer namespace bootstrap are closed with PASS. The next objective is one complete credential vertical for `staff-001.keys.demo-access.eth`; no credential in the issuer namespace exists yet. The existing `guest-001` physical fallback remains unchanged.
 
 ## Mobile issuer admission checkpoint
 
@@ -16,6 +16,21 @@ MOBILE ISSUER ADMISSION: PASS.
 - The recoverable operation journal persists `SUBMITTING_NO_HASH` before provider submission, persists a returned hash immediately, never blindly retries an ambiguous submission, and requires nonce proof plus explicit re-arm after a proven no-broadcast result.
 - M1 performed no ENS writes. The established `guest-001` physical fallback, APDU v1, HCE, Node verifier and firmware remain unchanged.
 - Final validation: Node 163/163; Android 107/107; Android debug assembly and diff check PASS.
+
+## ENSv2 issuer namespace checkpoint
+
+ENSV2 ISSUER NAMESPACE: PASS.
+
+- Public configuration: `config/issuer-space.json`.
+- Namespace: `keys.demo-access.eth`, REGISTERED to issuer `0xFa90e8301A22833B74378C5fA3a7c120Ac512685` through existing parent registry R0.
+- R1 UserRegistry: `0x0AeB395be893149c0b60D9DAC3Ba55139D0dcA1a`, factory-verified as `UserRegistryImpl`. Issuer root roles are exactly REGISTRAR, REGISTRAR_ADMIN, RENEW and RENEW_ADMIN; DEV has no R1 root role.
+- S1 PermissionedResolver: `0x20766FB21498a99350F922ee3163F5a95F354a7f`, factory-verified as `PermissionedResolverImpl`. Issuer root roles are exactly SET_TEXT, SET_TEXT_ADMIN, SET_DATA and SET_DATA_ADMIN; DEV has no S1 root role.
+- `keys.demo-access.eth` points to R1/S1, expires at `1814392799` (`2027-06-30T21:59:59Z`), and grants its owner only ROLE_RENEW.
+- Bootstrap evidence: R1 deployment `0x632c6d6f9c04a381f763013bf304d30c15bcccc440b41df9350829cf6e952253`; S1 deployment `0x2e6e8f830527df1aa384fe09c0a51f27c8e8d7e2b0b3862a9c646aa29d38d94c`; namespace registration `0x5997d2a1ccbaf146de00dbddef79c49f00fedefd02fdb2399386910a1840230b`.
+- DEV performed only the three bootstrap writes. Issuer nonce remained `1`; DEV finalized at nonce `28`, with no pending transaction.
+- `demo-access.eth -> R0`, S0, `guest-001`, and `cred-001` remained intact. Android/HCE, Gate E, firmware, and the Node verifier were unchanged.
+- Android with Privy remains the intended primary issuer/holder product surface. The ESP32/PN532 path remains the reference physical verifier.
+- No `staff-001`, `visitor-001`, or `contractor-001` credential has been created.
 
 ## Batch B checkpoint
 
@@ -109,9 +124,9 @@ BATCH B — DEMO RELIABILITY: PASS.
 
 ## Next
 
-1. LIVE DEMO REHEARSAL: follow the cold-boot/preflight and controlled INACTIVE/DENY → activation/readback → fresh ALLOW/controller confirmation → consumed-proof replay DENY plan in `DEMO_RUNBOOK.md`.
-2. Record actual rehearsal evidence and stop on a concrete blocker; do not expand the secure protocol or reopen UI polish speculatively.
-3. Rehearsal remains unexecuted by this checkpoint; README, public deployment and submission work remain separate.
+1. Design and authorize one complete `staff-001.keys.demo-access.eth` vertical: issuer-side registration and records, holder ownership, readback, presentation, and verifier resolution through R1/S1.
+2. Preserve the existing `guest-001.demo-access.eth` fallback and Gate E reference path while proving the new vertical independently.
+3. Do not create staff/visitor/contractor credentials or claim dynamic physical discovery until their exact write plan and product flow are separately approved.
 
 ## Blockers
 

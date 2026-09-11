@@ -211,3 +211,14 @@ No product code has been written yet.
 - M1 transaction transport, persistent recovery and public read-only reconciliation: PASS. No ENS write, NFC run or firmware flash occurred during M1.
 - The existing `guest-001` physical fallback remains untouched. The next architecture target is the isolated `keys.demo-access.eth` namespace with R1 and S1; it was not started in this checkpoint.
 
+### ENSv2 issuer namespace bootstrap
+
+- Added and checkpointed the deterministic read-only issuer bootstrap planner at commit `35ff5ea13e00f0538f7d2d93356edf0abe5bb271` before execution.
+- Deployed R1 UserRegistry `0x0AeB395be893149c0b60D9DAC3Ba55139D0dcA1a` in transaction `0x632c6d6f9c04a381f763013bf304d30c15bcccc440b41df9350829cf6e952253`, block `11683691`. Factory provenance resolves to UserRegistryImpl, issuer root roles match the approved REGISTRAR/RENEW bitmap, and DEV root roles are zero.
+- Deployed S1 PermissionedResolver `0x20766FB21498a99350F922ee3163F5a95F354a7f` in transaction `0x2e6e8f830527df1aa384fe09c0a51f27c8e8d7e2b0b3862a9c646aa29d38d94c`, block `11683692`. Factory provenance resolves to PermissionedResolverImpl, issuer root roles match the approved SET_TEXT/SET_DATA bitmap, DEV root roles are zero, and initializer setters were empty.
+- Registered `keys.demo-access.eth` in transaction `0x5997d2a1ccbaf146de00dbddef79c49f00fedefd02fdb2399386910a1840230b`, block `11683693`, owned by the issuer with R1/S1 pointers, expiry `1814392799`, and ROLE_RENEW only.
+- Exactly three authorized blockchain writes occurred, sequentially with receipt/readback verification and no retry. DEV nonce advanced `25 -> 28`; issuer nonce remained `1` because it performed no bootstrap write.
+- Fresh post-write verification preserved `demo-access.eth -> R0`, S0 provenance, `guest-001`, and `cred-001`. Android/HCE, Gate E, firmware, and the Node verifier were unchanged.
+- Added public authoritative issuer namespace configuration and a read-only drift/onchain verifier. No RPC URL, key, Privy data, local path, or credential was added.
+- Next objective: design and separately authorize one complete `staff-001.keys.demo-access.eth` credential vertical. No staff/visitor/contractor credential or final issuer UI exists yet.
+

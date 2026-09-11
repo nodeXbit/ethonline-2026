@@ -688,3 +688,34 @@ Privy Android 0.14.0 successfully signed and broadcast the physical M1 transacti
 ### Revisit when
 
 A production RPC strategy, multi-chain requirement, or smart-wallet architecture requires a different read boundary without weakening transaction recovery guarantees.
+
+---
+
+## D-022 — Isolate mobile-issued credentials under an issuer-controlled ENSv2 namespace
+
+**Status:** Accepted
+**Date:** 2026-09-11
+
+### Decision
+
+Use the live `keys.demo-access.eth` branch for credentials issued by the dedicated Android Privy issuer `0xFa90e8301A22833B74378C5fA3a7c120Ac512685`. Its R1 UserRegistry is `0x0AeB395be893149c0b60D9DAC3Ba55139D0dcA1a`; its S1 PermissionedResolver is `0x20766FB21498a99350F922ee3163F5a95F354a7f`. Both are deterministic proxies deployed through the verified factory and controlled at root by the issuer, not DEV.
+
+Grant the issuer R1 root REGISTRAR/RENEW roles and their admin counterparts, and S1 root SET_TEXT/SET_DATA roles and their admin counterparts. On the `keys` entry inside R0, grant the issuer only ROLE_RENEW. Preserve `demo-access.eth -> R0`, S0, `guest-001`, and `cred-001` as the established fallback branch.
+
+Treat `config/issuer-space.json` as the public authoritative bootstrap configuration. The next implementation target is one complete `staff-001.keys.demo-access.eth` credential vertical. This decision does not create that credential or authorize any additional chain write.
+
+### Why
+
+The isolated branch separates issuer administration from the legacy operator-controlled demo path while allowing the Android product surface to register credentials and manage narrowly scoped text/data records. DEV was needed only to deploy and attach the namespace because it controls R0; it received no root authority in R1 or S1.
+
+### Consequences
+
+- R1 deployment transaction `0x632c6d6f9c04a381f763013bf304d30c15bcccc440b41df9350829cf6e952253` confirmed in block `11683691`.
+- S1 deployment transaction `0x2e6e8f830527df1aa384fe09c0a51f27c8e8d7e2b0b3862a9c646aa29d38d94c` confirmed in block `11683692`.
+- Namespace registration transaction `0x5997d2a1ccbaf146de00dbddef79c49f00fedefd02fdb2399386910a1840230b` confirmed in block `11683693` with expiry `1814392799`.
+- Android with Privy is the intended primary issuer/holder surface; ESP32/PN532 remains the reference physical verifier.
+- No staff, visitor, or contractor credential exists yet. No final issuer UI or dynamic physical credential discovery is claimed.
+
+### Revisit when
+
+The first credential vertical has an exact lifecycle, record schema, authorization plan, and verification contract ready for separate approval.
