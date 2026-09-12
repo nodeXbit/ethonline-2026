@@ -6,6 +6,9 @@
     <uses-feature
         android:name="android.hardware.nfc.hce"
         android:required="false" />
+    <uses-feature
+        android:name="android.hardware.nfc"
+        android:required="false" />
 
     <application
         android:name=".GateBApplication"
@@ -21,6 +24,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".gate.GateReaderActivity"
+            android:exported="true"
+            android:launchMode="singleTop" />
         <service
             android:name=".hce.GateC1HostApduService"
             android:exported="true"
