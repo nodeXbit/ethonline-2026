@@ -2,6 +2,10 @@
 
 Accepted product and architecture decisions for ETHOnline 2026.
 
+## D-025 - Preserve Studio transaction identity across asynchronous work
+
+Accepted 2026-09-12. Studio uses a process-scoped wallet/provider generation and write lease through final confirmation. Durable provider-invocation markers distinguish proven-unsent preparations from ambiguous submissions; late hashes remain journaled after Activity cancellation. Recovery reconciles exact wallet, credential, session, calldata, transaction and receipt identities. A different pass cannot replace an unfinished preparation implicitly. Final authority and time checks run again before submission, and confirmed management work remains blocked until authoritative readback succeeds.
+
 `STATUS.md` is authoritative for current implementation state. A decision listed here does not mean every planned layer is already implemented.
 
 ---

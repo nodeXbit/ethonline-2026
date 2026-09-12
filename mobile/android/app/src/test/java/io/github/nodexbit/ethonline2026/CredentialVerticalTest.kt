@@ -52,14 +52,14 @@ class CredentialVerticalTest {
         val store = MemoryStore()
         val coordinator = IssuanceCoordinator(store)
         coordinator.start(IssuerSpace.issuer, "")
-        coordinator.registerReady("register-op")
-        coordinator.registerSubmitted()
-        val configuring = coordinator.registerConfirmed()
+        coordinator.registerReady(coordinator.current(IssuerSpace.issuer)!!.identity, "register-op")
+        coordinator.registerSubmitted(coordinator.current(IssuerSpace.issuer)!!.identity)
+        val configuring = coordinator.registerConfirmed(coordinator.current(IssuerSpace.issuer)!!.identity)
         assertEquals(IssuanceState.REGISTERED_CONFIGURING, configuring.state)
         assertEquals("register-op", configuring.registerOperationId)
-        coordinator.recordsReady("records-op")
-        coordinator.recordsSubmitted()
-        val resumed = coordinator.recordsFailed()
+        coordinator.recordsReady(coordinator.current(IssuerSpace.issuer)!!.identity, "records-op")
+        coordinator.recordsSubmitted(coordinator.current(IssuerSpace.issuer)!!.identity)
+        val resumed = coordinator.recordsFailed(coordinator.current(IssuerSpace.issuer)!!.identity)
         assertEquals(IssuanceState.REGISTERED_CONFIGURING, resumed.state)
         assertEquals("register-op", resumed.registerOperationId)
         assertEquals("records-op", resumed.recordsOperationId)
@@ -70,9 +70,9 @@ class CredentialVerticalTest {
         val issuanceStore = MemoryStore()
         val first = IssuanceCoordinator(issuanceStore)
         first.start(IssuerSpace.issuer, "")
-        first.registerReady(REGISTER_OPERATION_ID)
-        first.registerSubmitted()
-        first.registerConfirmed()
+        first.registerReady(first.current(IssuerSpace.issuer)!!.identity, REGISTER_OPERATION_ID)
+        first.registerSubmitted(first.current(IssuerSpace.issuer)!!.identity)
+        first.registerConfirmed(first.current(IssuerSpace.issuer)!!.identity)
 
         val journal = TransactionJournal(MemoryJournal())
         journal.put(confirmedRegisterOperation())
@@ -87,7 +87,7 @@ class CredentialVerticalTest {
         assertEquals("Credential created\nSetup incomplete", ProductShellPolicy.humanIssuanceStatus(session.state))
         assertTrue(ProductShellPolicy.resumeSetupVisible(session.state))
         assertFalse(ProductShellPolicy.createCredentialVisible(session.state))
-        assertEquals(session, restored.registerConfirmed())
+        assertEquals(session, restored.registerConfirmed(restored.current(IssuerSpace.issuer)!!.identity))
 
         val firstReview = CredentialConfigurationPolicy.prepare(session)
         val repeatedReview = CredentialConfigurationPolicy.prepare(session)
@@ -109,9 +109,9 @@ class CredentialVerticalTest {
             firstReview.calls[1],
         )
         assertFalse(firstReview.calldata.contains("68747470733a2f2f6578616d706c652e636f6d2f73746166662e706e67"))
-        assertTrue(runCatching {
-            CredentialConfigurationPolicy.prepare(session.copy(avatarUri = "https://example.com/staff.png"))
-        }.isFailure)
+        assertEquals(3, CredentialConfigurationPolicy.prepare(
+            session.copy(avatarUri = "https://example.com/staff.png"),
+        ).calls.size)
         assertEquals(1, engine.all().size)
         assertNull(engine.latestForWallet(IssuerSpace.issuer, ContractTransactionRunner.RECORDS_OPERATION))
 
@@ -171,7 +171,7 @@ class CredentialVerticalTest {
         val store = MemoryStore()
         val first = IssuanceCoordinator(store)
         val registerSession = first.start(IssuerSpace.issuer, "").let {
-            first.registerReady("register-op").let { first.registerSubmitted() }
+            first.registerReady(first.current(IssuerSpace.issuer)!!.identity, "register-op").let { first.registerSubmitted(first.current(IssuerSpace.issuer)!!.identity) }
         }
         val reloaded = IssuanceCoordinator(store)
         val registerOperation = operation("register-op", ContractTransactionRunner.REGISTER_OPERATION)
@@ -180,9 +180,9 @@ class CredentialVerticalTest {
             reloaded.recoveryAction(registerSession, registerOperation, null),
         )
 
-        first.registerConfirmed()
-        first.recordsReady("records-op")
-        val recordsSession = first.recordsSubmitted()
+        first.registerConfirmed(first.current(IssuerSpace.issuer)!!.identity)
+        first.recordsReady(first.current(IssuerSpace.issuer)!!.identity, "records-op")
+        val recordsSession = first.recordsSubmitted(first.current(IssuerSpace.issuer)!!.identity)
         val recordsOperation = operation("records-op", ContractTransactionRunner.RECORDS_OPERATION)
         assertEquals(
             IssuanceRecoveryAction.RECOVER_RECORDS,
@@ -258,13 +258,13 @@ class CredentialVerticalTest {
         val issuanceStore = MemoryStore()
         val first = IssuanceCoordinator(issuanceStore)
         first.start(IssuerSpace.issuer, "")
-        first.registerReady(REGISTER_OPERATION_ID)
-        first.registerSubmitted()
-        first.registerConfirmed()
-        first.recordsReady(RECORDS_OPERATION_ID)
-        first.recordsSubmitted()
-        first.recordsConfirmed()
-        first.beginReadback()
+        first.registerReady(first.current(IssuerSpace.issuer)!!.identity, REGISTER_OPERATION_ID)
+        first.registerSubmitted(first.current(IssuerSpace.issuer)!!.identity)
+        first.registerConfirmed(first.current(IssuerSpace.issuer)!!.identity)
+        first.recordsReady(first.current(IssuerSpace.issuer)!!.identity, RECORDS_OPERATION_ID)
+        first.recordsSubmitted(first.current(IssuerSpace.issuer)!!.identity)
+        first.recordsConfirmed(first.current(IssuerSpace.issuer)!!.identity)
+        first.beginReadback(first.current(IssuerSpace.issuer)!!.identity)
 
         val journalStore = MemoryJournal()
         val journal = TransactionJournal(journalStore)
@@ -294,10 +294,10 @@ class CredentialVerticalTest {
             wait = {},
             attempts = 1,
         ).reconcile(expectation(), minimumBlock)
-        val ready = restored.ready()
+        val ready = restored.ready(restored.current(IssuerSpace.issuer)!!.identity)
         assertEquals(IssuanceState.READY, ready.state)
-        assertEquals(ready, restored.ready())
-        assertEquals(ready, restored.beginReadback())
+        assertEquals(ready, restored.ready(restored.current(IssuerSpace.issuer)!!.identity))
+        assertEquals(ready, restored.beginReadback(restored.current(IssuerSpace.issuer)!!.identity))
         assertEquals(1, readCalls)
         assertEquals(2, engine.all().size)
         assertEquals(1, engine.all().count { it.operationType == ContractTransactionRunner.RECORDS_OPERATION })

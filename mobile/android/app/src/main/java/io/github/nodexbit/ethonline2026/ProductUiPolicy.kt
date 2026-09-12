@@ -1,6 +1,6 @@
 package io.github.nodexbit.ethonline2026
 
-enum class ProductDestination { MY_KEYS, ISSUER, SETTINGS, DIAGNOSTICS }
+enum class ProductDestination { MY_KEYS, STUDIO, SETTINGS, DIAGNOSTICS }
 
 object ProductBrand {
     const val NAME = "LockENS"
@@ -37,7 +37,7 @@ object ProductSpacing {
 
 object ReviewDialogPolicy {
     fun actionPlan(recordsOnly: Boolean) = ReviewDialogActionPlan(
-        primaryLabel = if (recordsOnly) "Configure credential" else "Create credential",
+        primaryLabel = if (recordsOnly) "Configure pass" else "Create pass",
         stackedFullWidth = true,
         minimumControlHeightDp = ProductSpacing.CONTROL_HEIGHT_DP,
     )
@@ -61,11 +61,17 @@ data class StaffReviewPresentation(
     val artwork: String,
     val network: String,
     val transactionPurposes: List<String>,
+    val accessExpiry: String = expires,
+    val accessUtcExpiry: String = utcExpiry,
+    val template: String = "STAFF",
 )
 
 data class CredentialReviewDraft(
     val avatarUri: String,
     val presentation: StaffReviewPresentation,
+    val passDraft: PassDraft? = null,
+    val walletBinding: StudioWalletBinding? = null,
+    val configurationSession: IssuanceSession? = null,
 )
 
 data class CredentialConfigurationReviewDraft(
@@ -79,6 +85,35 @@ object CredentialReviewPolicy {
     fun prepare(avatarInput: String): CredentialReviewDraft {
         val avatar = CredentialValidation.normalizeAvatar(avatarInput)
         return CredentialReviewDraft(avatar, ProductShellPolicy.staffReview(avatar))
+    }
+
+    fun prepare(draft: PassDraft, issuingWallet: String): CredentialReviewDraft {
+        val pass = PassReviewPolicy.present(draft)
+        return CredentialReviewDraft(
+            avatarUri = draft.artworkUri,
+            presentation = StaffReviewPresentation(
+                credential = pass.credential,
+                recipient = pass.recipientCompact,
+                exactRecipient = pass.recipientExact,
+                issuingWallet = issuingWallet,
+                access = pass.access,
+                expires = pass.registrationLocal,
+                exactExpiry = pass.registrationLocal,
+                utcExpiry = pass.registrationUtc,
+                transferability = pass.transferability,
+                description = pass.description,
+                artwork = pass.artwork,
+                network = "Sepolia",
+                transactionPurposes = listOf(
+                    "Create the access pass.",
+                    "Configure its access and presentation records.",
+                ),
+                accessExpiry = pass.accessLocal,
+                accessUtcExpiry = pass.accessUtc,
+                template = draft.template.title,
+            ),
+            passDraft = draft,
+        )
     }
 
     fun matchesCurrentArtwork(review: CredentialReviewDraft, avatarInput: String): Boolean =
@@ -98,20 +133,27 @@ object CredentialConfigurationPolicy {
     fun calldata(session: IssuanceSession): String = build(session).calldata
 
     private fun build(session: IssuanceSession): CredentialConfigurationReviewDraft {
-        require(session.wallet.equals(IssuerSpace.issuer, true)) { "WRONG_ISSUER" }
-        require(session.fullName == IssuerSpace.fullName) { "WRONG_CREDENTIAL" }
-        require(session.holder.equals(IssuerSpace.STAFF_HOLDER, true)) { "WRONG_OWNER" }
-        require(session.expiry == java.math.BigInteger.valueOf(IssuerSpace.STAFF_EXPIRY)) { "WRONG_REGISTRY_EXPIRY" }
-        require(session.description == IssuerSpace.DEFAULT_DESCRIPTION) { "WRONG_DESCRIPTION" }
-        require(session.avatarUri.isBlank()) { "RECOVERED_STAFF_ARTWORK_NOT_BLANK" }
         val calls = CredentialAbi.credentialRecords(
             session.fullName,
             session.avatarUri,
             session.description,
             session.expiry,
+            session.accessActive,
+            session.accessValidUntil,
+        )
+        val draft = PassDraft(
+            session.template,
+            session.fullName.removeSuffix(".${IssuerSpace.namespace}"),
+            session.configurationOwner,
+            session.expiry,
+            session.accessActive,
+            session.accessValidUntil,
+            session.configurationTransferable,
+            session.description,
+            session.avatarUri,
         )
         return CredentialConfigurationReviewDraft(
-            review = CredentialReviewPolicy.prepare(session.avatarUri),
+            review = CredentialReviewPolicy.prepare(draft, session.wallet).copy(configurationSession = session),
             calls = calls,
             calldata = CredentialAbi.multicall(calls),
             purpose = PURPOSE,
@@ -137,19 +179,30 @@ data class SafeActionFailure(
 
 object SafeActionFailurePolicy {
     private val SAFE_CODE = Regex("^[A-Z][A-Z0-9_]{1,95}$")
-    private val SECRET_MARKER = Regex("(?i)(https?://|authorization|bearer|token|secret|private|email|otp|signature)")
 
     fun from(action: String, stage: String, error: Throwable): SafeActionFailure {
-        val exception = error::class.simpleName?.take(64) ?: "Error"
-        val rawCategory = error.message?.trim()
-        val category = rawCategory
-            ?.takeIf { SAFE_CODE.matches(it) && !SECRET_MARKER.containsMatchIn(it) }
-            ?: exception.replace(Regex("[^A-Za-z0-9]+"), "_").uppercase().take(96)
+        val exception = StudioErrors.exceptionClass(error)
+        val category = StudioErrors.category(error)
         val safeStage = stage.takeIf(SAFE_CODE::matches) ?: "ACTION"
         val safeAction = action.replace(Regex("[^A-Za-z0-9 ._-]+"), "").trim().take(64).ifBlank { "Operation" }
-        val human = when (safeStage) {
+        val human = when {
+            error is StudioManagementConflict ->
+                "Another pass has an unfinished transaction. Open ${error.session.fullName} in Studio to resume or resolve it."
+            error is StudioOperationConflict -> {
+                val name = error.operation.operationType.substringAfter(':', IssuerSpace.fullName)
+                "Another pass has an unfinished transaction. Open $name in Studio to resume or resolve it."
+            }
+            category == "INVALID_CALENDAR_DATE" -> "Enter a real calendar date using yyyy-MM-dd HH:mm (Europe/Madrid)."
+            category.startsWith("DST_") -> "This Madrid time is skipped or occurs twice. Choose an unambiguous time outside the clock change."
+            category == "INVALID_RECIPIENT_CHECKSUM" -> "The mixed-case recipient checksum is invalid. Verify and paste the exact address again."
+            category == "WALLET_CHANGED_REVIEW_AGAIN" -> "The selected wallet changed. Review the operation again."
+            category == "CREDENTIAL_CHANGED_AFTER_REGISTRATION" ->
+                "Credential changed after registration. Resume setup to review and acknowledge its current owner and transferability."
+            category == "ACCESS_EXPIRED_REVIEW_AGAIN" -> "Access validity expired. Update its time and review setup again."
+            category == "MANAGEMENT_FINALIZATION_PENDING" -> "A previous update still needs verification. Resume that update before another write."
+            else -> when (safeStage) {
             "POST_TX1_FINALIZATION" ->
-                "Credential creation is confirmed. Setup is incomplete; reopen Issuer and use Resume setup."
+                "Pass creation is confirmed. Setup is incomplete; reopen Studio and use Resume setup."
             "TX2_REVIEW_PREFLIGHT" ->
                 "Could not verify the existing credential for setup. No configuration transaction was started."
             "TX2_SUBMISSION" ->
@@ -157,6 +210,7 @@ object SafeActionFailurePolicy {
             "FINAL_READBACK" ->
                 "Verification is temporarily unavailable. TX2 is confirmed; retry verification without resending it."
             else -> "$safeAction could not be completed safely. Check Developer Diagnostics for details."
+        }
         }
         return SafeActionFailure(safeAction, safeStage, category, human, exception)
     }
@@ -174,7 +228,7 @@ object ProductShellPolicy {
         !authenticated -> emptySet()
         issuerCapability -> setOf(
             ProductDestination.MY_KEYS,
-            ProductDestination.ISSUER,
+            ProductDestination.STUDIO,
             ProductDestination.SETTINGS,
         )
         else -> setOf(ProductDestination.MY_KEYS, ProductDestination.SETTINGS)
@@ -245,6 +299,9 @@ object ProductShellPolicy {
             review.artwork,
             review.network,
             review.transactionPurposes.joinToString(" "),
+            review.accessExpiry,
+            review.accessUtcExpiry,
+            review.template,
         ).joinToString(" ").lowercase()
         return TECHNICAL_TERMS.any(visible::contains)
     }
@@ -301,6 +358,7 @@ object ProductShellPolicy {
         TransactionOperationState.READY_TO_REVIEW,
         TransactionOperationState.READY_TO_SUBMIT,
         -> if (operation.safeErrorCategory == null) "Waiting for wallet approval" else "Status unavailable"
+        TransactionOperationState.SUBMISSION_CLAIMED -> "Preparing wallet request — not sent"
         TransactionOperationState.SUBMITTING_NO_HASH -> "Submitting — do not retry"
         TransactionOperationState.HASH_RECEIVED -> "Submitted"
         TransactionOperationState.CONFIRMING,

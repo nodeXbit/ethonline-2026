@@ -139,6 +139,27 @@ class CredentialDiscoveryService(
     private val read: suspend (String) -> CredentialSnapshot,
     private val candidateLimit: Int = 100,
 ) {
+    suspend fun discoverManageable(manual: List<CredentialReference> = emptyList()): CredentialDiscoveryResult = try {
+        val (automatic, scannedToBlock) = source.candidates()
+        val automaticCandidates = automatic
+            .filter { it.chainId == IssuerSpace.chainId }
+            .distinctBy { CredentialValidation.normalizeFullName(it.fullName) }
+        val candidates = (automaticCandidates + manual)
+            .filter { it.chainId == IssuerSpace.chainId }
+            .distinctBy { CredentialValidation.normalizeFullName(it.fullName) }
+        require(candidates.size <= candidateLimit) { "DISCOVERY_CANDIDATE_LIMIT" }
+        val snapshots = candidates.map { read(it.fullName) }
+        val failed = snapshots.firstOrNull { it.readStatus != CredentialReadStatus.FRESH }
+        if (failed != null) {
+            CredentialDiscoveryResult.Unavailable(failed.failureCategory ?: "READBACK_UNAVAILABLE")
+        } else {
+            CredentialDiscoveryResult.Available(snapshots, automaticCandidates.size, scannedToBlock)
+        }
+    } catch (error: Throwable) {
+        if (error is CancellationException) throw error
+        CredentialDiscoveryResult.Unavailable(safeDiscoveryCategory(error))
+    }
+
     suspend fun discover(wallet: String, manual: List<CredentialReference>): CredentialDiscoveryResult = try {
         CredentialValidation.requireAddress(wallet)
         val (automatic, scannedToBlock) = source.candidates()

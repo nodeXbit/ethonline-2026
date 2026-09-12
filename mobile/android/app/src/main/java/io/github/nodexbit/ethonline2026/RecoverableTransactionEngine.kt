@@ -6,6 +6,7 @@ enum class TransactionOperationState {
     DRAFT,
     READY_TO_REVIEW,
     READY_TO_SUBMIT,
+    SUBMISSION_CLAIMED,
     SUBMITTING_NO_HASH,
     HASH_RECEIVED,
     CONFIRMING,
@@ -176,6 +177,72 @@ class RecoverableTransactionEngine(
     private val now: () -> Long = System::currentTimeMillis,
     private val newOperationId: () -> String = { UUID.randomUUID().toString() },
 ) {
+    private val liveProviders = mutableSetOf<String>()
+    @Synchronized fun providerInvocationLive(operationId: String) = operationId in liveProviders
+    @Synchronized fun claimProviderSubmission(operationId: String, latest: String, pending: String): PersistedTransactionOperation {
+        val current = required(operationId)
+        require(current.state == TransactionOperationState.READY_TO_SUBMIT) { "OPERATION_NOT_READY_TO_SUBMIT" }
+        require(latest == pending) { "PENDING_TRANSACTION" }
+        return journal.put(current.copy(state = TransactionOperationState.SUBMISSION_CLAIMED,
+            preLatestNonce = latest, prePendingNonce = pending, updatedAt = now(),
+            safeErrorCategory = null, failureStage = null, safeExceptionClass = null, safeErrorMessage = null))
+    }
+    @Synchronized fun beginProviderInvocation(operationId: String): PersistedTransactionOperation {
+        val current = required(operationId)
+        require(current.state == TransactionOperationState.SUBMISSION_CLAIMED) { "OPERATION_NOT_CLAIMED" }
+        // Commit BEFORE calling the provider. A crash after this marker is deliberately ambiguous.
+        val started = journal.put(current.copy(state = TransactionOperationState.SUBMITTING_NO_HASH, updatedAt = now()))
+        liveProviders.add(operationId)
+        return started
+    }
+    @Synchronized fun finishProviderInvocation(operationId: String) { liveProviders.remove(operationId) }
+
+    @Synchronized fun cancelUninvokedClaim(operationId: String): PersistedTransactionOperation {
+        val current = required(operationId)
+        require(current.state == TransactionOperationState.SUBMISSION_CLAIMED && !providerInvocationLive(operationId)) {
+            "SUBMISSION_OUTCOME_UNRESOLVED"
+        }
+        return journal.put(current.copy(state = TransactionOperationState.NO_BROADCAST_PROVEN, updatedAt = now()))
+    }
+
+    fun preparedForWallet(wallet: String): List<PersistedTransactionOperation> = all().filter {
+        it.walletAddress.equals(wallet, true) && it.state in preparedStates
+    }
+
+    @Synchronized fun cancelPreparedOperation(reviewed: PersistedTransactionOperation): PersistedTransactionOperation {
+        require(required(reviewed.operationId) == reviewed && reviewed.state in preparedStates &&
+            !providerInvocationLive(reviewed.operationId)) { "WRITE_INTENT_MISMATCH" }
+        return transition(reviewed.operationId, TransactionOperationState.CANCELLED)
+    }
+
+    /** Final review may replace only its explicitly linked, still-unsent operation. */
+    @Synchronized fun prepareReviewedOperation(intent: TransactionIntent, replacesOperationId: String?): PersistedTransactionOperation {
+        val active = requireReviewAvailable(intent, replacesOperationId)
+        if (active != null) transition(active.operationId, TransactionOperationState.CANCELLED)
+        return createInternal(intent)
+    }
+
+    @Synchronized fun requireReviewAvailable(intent: TransactionIntent, replacesOperationId: String?): PersistedTransactionOperation? {
+        val replacement = replacesOperationId?.let(::required)
+        if (replacement != null) {
+            require(replacement.walletAddress.equals(intent.walletAddress, true) &&
+                replacement.operationType == intent.operationType && replacement.chainId == intent.chainId &&
+                replacement.targetAddress.equals(intent.targetAddress, true) && replacement.valueWei == intent.valueWei) {
+                "WRITE_INTENT_MISMATCH"
+            }
+        }
+        val active = journal.activeForWallet(intent.walletAddress)
+        if (active != null && (active.operationId != replacesOperationId || active.state !in preparedStates)) {
+            throw StudioOperationConflict(active)
+        }
+        if (replacement != null) {
+            require(replacement.state in preparedStates || replacement.state in setOf(
+                TransactionOperationState.CANCELLED, TransactionOperationState.NO_BROADCAST_PROVEN,
+                TransactionOperationState.REVERTED)) { "WRITE_INTENT_MISMATCH" }
+        }
+        return active
+    }
+
     fun all(): List<PersistedTransactionOperation> = journal.all()
     fun find(operationId: String): PersistedTransactionOperation? = journal.find(operationId)
     fun latestForWallet(
@@ -317,7 +384,8 @@ class RecoverableTransactionEngine(
     fun recordHash(operationId: String, txHash: String): PersistedTransactionOperation {
         require(HASH.matches(txHash)) { "MALFORMED_TRANSACTION_HASH" }
         val current = required(operationId)
-        require(current.state == TransactionOperationState.SUBMITTING_NO_HASH) { "HASH_NOT_EXPECTED" }
+        if (current.txHash.equals(txHash, true)) return current
+        require(current.state in setOf(TransactionOperationState.SUBMITTING_NO_HASH, TransactionOperationState.UNKNOWN)) { "HASH_NOT_EXPECTED" }
         require(current.txHash == null) { "HASH_ALREADY_RECORDED" }
         return journal.put(
             current.copy(
@@ -357,6 +425,11 @@ class RecoverableTransactionEngine(
         pendingNonce: String,
     ): PersistedTransactionOperation {
         val current = required(operationId)
+        require(!providerInvocationLive(operationId)) { "PROVIDER_REQUEST_OUTSTANDING" }
+        require(current.operationType !in setOf(ContractTransactionRunner.REGISTER_OPERATION, ContractTransactionRunner.RECORDS_OPERATION) &&
+            StudioActionType.entries.none { current.operationType.startsWith("${it.name}:") }) {
+            "SUBMISSION_OUTCOME_UNRESOLVED"
+        }
         require(current.txHash == null) { "HASH_EXISTS" }
         require(current.state in noHashRecoveryStates) { "NO_BROADCAST_PROOF_NOT_ALLOWED" }
         val unchanged = latestNonce == current.preLatestNonce && pendingNonce == current.prePendingNonce
@@ -430,6 +503,8 @@ class RecoverableTransactionEngine(
         journal.find(operationId) ?: error("TRANSACTION_OPERATION_NOT_FOUND")
 
     companion object {
+        private val preparedStates = setOf(TransactionOperationState.DRAFT,
+            TransactionOperationState.READY_TO_REVIEW, TransactionOperationState.READY_TO_SUBMIT)
         private val HASH = Regex("^0x[0-9a-fA-F]{64}$")
         private val terminalStates = setOf(
             TransactionOperationState.CONFIRMED,
@@ -452,9 +527,11 @@ class RecoverableTransactionEngine(
                 TransactionOperationState.CANCELLED,
             ),
             TransactionOperationState.READY_TO_SUBMIT to setOf(
+                TransactionOperationState.SUBMISSION_CLAIMED,
                 TransactionOperationState.SUBMITTING_NO_HASH,
                 TransactionOperationState.CANCELLED,
             ),
+            TransactionOperationState.SUBMISSION_CLAIMED to setOf(TransactionOperationState.NO_BROADCAST_PROVEN),
             TransactionOperationState.SUBMITTING_NO_HASH to setOf(TransactionOperationState.UNKNOWN),
             TransactionOperationState.HASH_RECEIVED to setOf(
                 TransactionOperationState.CONFIRMING,

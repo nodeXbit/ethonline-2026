@@ -29,15 +29,15 @@ class ProductUiPolicyTest {
         val destinations = ProductShellPolicy.destinations(authenticated = true, issuerCapability = false)
         assertEquals(ProductDestination.MY_KEYS, ProductShellPolicy.defaultDestination(authenticated = true))
         assertEquals(setOf(ProductDestination.MY_KEYS, ProductDestination.SETTINGS), destinations)
-        assertFalse(ProductDestination.ISSUER in destinations)
+        assertFalse(ProductDestination.STUDIO in destinations)
     }
 
     @Test
     fun `issuer navigation requires fresh onchain capability result`() {
         val holder = ProductShellPolicy.destinations(authenticated = true, issuerCapability = false)
         val issuer = ProductShellPolicy.destinations(authenticated = true, issuerCapability = true)
-        assertFalse(ProductDestination.ISSUER in holder)
-        assertTrue(ProductDestination.ISSUER in issuer)
+        assertFalse(ProductDestination.STUDIO in holder)
+        assertTrue(ProductDestination.STUDIO in issuer)
         assertEquals("Active wallet · 0xFa90…2685", ProductShellPolicy.identityLabel(IssuerSpace.issuer, true))
         assertEquals("Active wallet · 0x3419…5FF7", ProductShellPolicy.identityLabel(IssuerSpace.STAFF_HOLDER, false))
     }
@@ -112,7 +112,7 @@ class ProductUiPolicyTest {
         assertEquals("POST_TX1_FINALIZATION", finalization.stage)
         assertEquals("ILLEGAL_ISSUANCE_TRANSITION", finalization.category)
         assertEquals("IllegalArgumentException", finalization.exceptionClass)
-        assertTrue(finalization.humanMessage.contains("Credential creation is confirmed"))
+        assertTrue(finalization.humanMessage.contains("Pass creation is confirmed"))
 
         val secret = SafeActionFailurePolicy.from(
             "Resume setup", "TX2_REVIEW_PREFLIGHT",
@@ -121,7 +121,7 @@ class ProductUiPolicyTest {
         val visible = secret.diagnosticText() + secret.humanMessage
         assertFalse(visible.contains("rpc.example"))
         assertFalse(visible.contains("do-not-expose"))
-        assertEquals("ILLEGALARGUMENTEXCEPTION", secret.category)
+        assertEquals("VALIDATION_FAILED", secret.category)
     }
 
     @Test
@@ -141,7 +141,7 @@ class ProductUiPolicyTest {
     @Test
     fun `long configure action uses accessible stacked full width layout`() {
         val plan = ReviewDialogPolicy.actionPlan(recordsOnly = true)
-        assertEquals("Configure credential", plan.primaryLabel)
+        assertEquals("Configure pass", plan.primaryLabel)
         assertTrue(plan.stackedFullWidth)
         assertEquals(ProductSpacing.CONTROL_HEIGHT_DP, plan.minimumControlHeightDp)
     }

@@ -1,5 +1,12 @@
 # Worklog
 
+## 2026-09-12 - Studio safety checkpoint validation
+
+- Reviewed the complete Studio worktree diff, including transaction coordination, persistence migration, UI, and adversarial fixtures. Changes are scoped to Studio and its shared transaction safeguards; secret-pattern matches are deliberately fake test inputs.
+- Android JVM tests: 228 passed, zero failures/errors/skips; `testDebugUnitTest assembleDebug` succeeded using the installed Android Studio JDK and SDK. Node: 173 passed with `node --test --experimental-test-isolation=none` (sandbox process spawning prevents the isolated runner).
+- Read-only Studio simulation passed at Sepolia block 11687260 for STAFF, VISITOR, and CONTRACTOR. Existing staff and issuer nonce 3 were unchanged. No signature, transaction, credential creation, or firmware flash occurred.
+- This checkpoint precedes dynamic NFC implementation. Only the reviewed Studio changes and checkpoint documentation are authorized for commit/push.
+
 ## 2026-09-05
 
 Preflight development environment completed.

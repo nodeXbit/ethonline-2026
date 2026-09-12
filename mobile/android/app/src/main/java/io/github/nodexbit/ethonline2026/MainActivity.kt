@@ -3,6 +3,8 @@ package io.github.nodexbit.ethonline2026
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.Dialog
+import android.app.DatePickerDialog
+import android.app.TimePickerDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -32,6 +34,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import java.math.BigInteger
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import io.privy.auth.PrivyUser
@@ -76,6 +79,24 @@ class MainActivity : Activity() {
     private lateinit var importCredentialInput: EditText
     private lateinit var issuerProductSection: LinearLayout
     private lateinit var artworkInput: EditText
+    private lateinit var passLabelInput: EditText
+    private lateinit var passRecipientInput: EditText
+    private lateinit var registrationExpiryInput: EditText
+    private lateinit var accessValidUntilInput: EditText
+    private lateinit var accessActiveInput: CheckBox
+    private lateinit var transferableInput: CheckBox
+    private lateinit var descriptionInput: EditText
+    private lateinit var derivedNameText: TextView
+    private lateinit var selectedTemplateText: TextView
+    private lateinit var studioCapabilityText: TextView
+    private lateinit var studioCreateContent: LinearLayout
+    private lateinit var studioManageContent: LinearLayout
+    private lateinit var studioCreateTab: Button
+    private lateinit var studioManageTab: Button
+    private lateinit var studioFormFields: LinearLayout
+    private lateinit var studioSavedSummary: LinearLayout
+    private val templateButtons = linkedMapOf<PassTemplate, Button>()
+    private lateinit var managePassesContainer: LinearLayout
     private lateinit var createReviewButton: Button
     private lateinit var resumeSetupButton: Button
     private lateinit var copyCredentialButton: Button
@@ -108,7 +129,13 @@ class MainActivity : Activity() {
     private var currentDestination = ProductDestination.MY_KEYS
     private var issuerCapabilityConfirmed = false
     private var issuerCapabilityState = IssuerCapabilityState.UNAVAILABLE
+    private var studioCapabilities = StudioCapabilities.unavailable("NOT_CHECKED")
+    private var selectedTemplate = PassTemplate.STAFF
     private var lastActionFailure: SafeActionFailure? = null
+    private val writeCoordinator = StudioRuntime.writes
+    private var readActionCount = 0
+    private var stopWriteObservation: (() -> Unit)? = null
+    private lateinit var issuanceSessionsContainer: LinearLayout
     private var currentUser: PrivyUser? = null
     private var ethereumWallet: EmbeddedEthereumWallet? = null
     private var gateBSignature: String? = null
@@ -125,7 +152,7 @@ class MainActivity : Activity() {
     private val credentialFinalReadback by lazy {
         CredentialFinalReadbackReconciler(read = { fullName -> credentialReader.read(fullName) })
     }
-    private val credentialTransactionEngine by lazy {
+    private val credentialTransactionEngine by lazy { StudioRuntime.engine {
         val preferences = getSharedPreferences(CREDENTIAL_PREFERENCES, MODE_PRIVATE)
         RecoverableTransactionEngine(
             TransactionJournal(
@@ -139,10 +166,13 @@ class MainActivity : Activity() {
                 },
             ),
         )
-    }
-    private val issuanceCoordinator by lazy {
+    } }
+    private val issuanceCoordinator by lazy { StudioRuntime.issuance {
         sharedStringStore(CREDENTIAL_ISSUANCE_JOURNAL).let(::IssuanceCoordinator)
-    }
+    } }
+    private val managementCoordinator by lazy { StudioRuntime.management {
+        sharedStringStore(CREDENTIAL_MANAGEMENT_JOURNAL).let(::ManagementSessionCoordinator)
+    } }
     private val credentialIndex by lazy {
         sharedStringStore(CREDENTIAL_LOCAL_INDEX).let(::LocalCredentialIndex)
     }
@@ -185,6 +215,7 @@ class MainActivity : Activity() {
         window.statusBarColor = pageColor()
         window.navigationBarColor = pageColor()
         setContentView(buildContentView())
+        stopWriteObservation = writeCoordinator.observe { runOnUiThread { setBusy(false) } }
 
         if (!gateBApplication.isPrivyConfigured) {
             showLoggedOutShell()
@@ -217,6 +248,16 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        val active = writeCoordinator.currentWallet()
+        if (active != null && contractRunner?.identity?.wallet != active) {
+            val selected = authenticatedWallets.singleOrNull {
+                it.address.equals(active.address, true) && walletProviderId(it) == active.providerId
+            }
+            if (selected != null) {
+                selectWallet(selected, "Active wallet synchronized. Review the operation again.")
+                return
+            }
+        }
         val wallet = ethereumWallet ?: return
         if (System.currentTimeMillis() - lastCredentialRefreshAtMillis >= FOREGROUND_REFRESH_AGE_MILLIS) {
             refreshProduct(wallet.address)
@@ -224,6 +265,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        stopWriteObservation?.invoke()
         activityScope.cancel()
         super.onDestroy()
     }
@@ -361,7 +403,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(20), 0, dp(18))
         }
         myKeysNavButton = navigationButton("My Keys") { showDestination(ProductDestination.MY_KEYS) }
-        issuerNavButton = navigationButton("Issuer") { showDestination(ProductDestination.ISSUER) }.apply {
+        issuerNavButton = navigationButton("Studio") { showDestination(ProductDestination.STUDIO) }.apply {
             visibility = View.GONE
         }
         settingsNavButton = navigationButton("Settings") { showDestination(ProductDestination.SETTINGS) }
@@ -410,44 +452,123 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
         }
-        issuerProductSection.addView(sectionHeader("NEW CREDENTIAL", "Create a verified digital key for staff access."), matchWrapParams())
-        issuerProductSection.addView(detailCard("CREDENTIAL IDENTITY", listOf(
-            "Name" to "Staff access",
-            "ENS name" to IssuerSpace.fullName,
-        )), cardParams())
-        issuerProductSection.addView(detailCard("RECIPIENT", listOf(
-            "Wallet" to ProductShellPolicy.compactAddress(IssuerSpace.STAFF_HOLDER),
-        )), cardParams())
-        issuerProductSection.addView(detailCard("ACCESS POLICY", listOf(
-            "Expires" to "31 Oct 2026, 23:59",
-            "Transferability" to "Non-transferable",
-            "Initial access" to "Allowed",
-        )), cardParams())
-        val presentationCard = productCard()
-        presentationCard.addView(productCaption("PRESENTATION"), matchWrapParams())
-        presentationCard.addView(productBody("Artwork URI · optional"), matchWrapParams())
-        artworkInput = productInput("https:// or ipfs://").apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        issuerProductSection.addView(sectionHeader("Studio", "Create access. Keep it up to date."), matchWrapParams())
+        studioCapabilityText = productBody("Checking wallet permissions…").apply {
+            textSize = 12f
+            setPadding(dp(2), 0, dp(2), dp(12))
         }
-        presentationCard.addView(artworkInput, matchWrapParams())
-        presentationCard.addView(valueRow("Description", IssuerSpace.DEFAULT_DESCRIPTION), matchWrapParams())
-        issuerProductSection.addView(presentationCard, cardParams())
-        createReviewButton = productButton("Review credential", action = ::reviewCredential)
-        issuerProductSection.addView(createReviewButton, actionParams())
-        resumeSetupButton = productButton("Resume setup", action = ::resumeIssuance).apply { visibility = View.GONE }
-        issuerProductSection.addView(resumeSetupButton, actionParams())
-        copyCredentialButton = productButton("Copy credential name", primary = false, action = ::copyCredentialName).apply {
-            visibility = View.GONE
+        issuerProductSection.addView(studioCapabilityText, matchWrapParams())
+        val studioTabs = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = roundedBackground(surfaceMutedColor(), dp(16).toFloat())
         }
-        issuerProductSection.addView(copyCredentialButton, actionParams())
+        studioCreateTab = productButton("Create", primary = false) { showStudioMode(false) }
+        studioManageTab = productButton("Manage", primary = false) { showStudioMode(true) }
+        studioTabs.addView(studioCreateTab, weightedParams())
+        studioTabs.addView(studioManageTab, weightedParams())
+        issuerProductSection.addView(studioTabs, cardParams())
+        issuanceSessionsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        issuerProductSection.addView(issuanceSessionsContainer, cardParams())
+        studioCreateContent = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        studioManageContent = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        issuerProductSection.addView(studioCreateContent, matchWrapParams())
+        issuerProductSection.addView(studioManageContent, matchWrapParams())
+
         productStatusText = productBody("").apply {
             visibility = View.GONE
             setTextColor(textPrimaryColor())
-            setTypeface(typeface, Typeface.BOLD)
-            background = roundedBackground(surfaceMutedColor(), dp(14).toFloat())
+            background = roundedBackground(surfaceMutedColor(), dp(14).toFloat(), borderColor())
             setPadding(dp(16), dp(14), dp(16), dp(14))
         }
-        issuerProductSection.addView(productStatusText, cardParams())
+        studioCreateContent.addView(productStatusText, cardParams())
+        resumeSetupButton = productButton("Resume setup", action = ::resumeIssuance).apply { visibility = View.GONE }
+        studioCreateContent.addView(resumeSetupButton, actionParams())
+        copyCredentialButton = productButton("Copy credential name", primary = false, action = ::copyCredentialName).apply {
+            visibility = View.GONE
+        }
+        studioCreateContent.addView(copyCredentialButton, actionParams())
+        studioSavedSummary = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        studioCreateContent.addView(studioSavedSummary, matchWrapParams())
+
+        studioCreateContent.addView(formHeading("Choose a starting point", "Every preset can be adjusted before review."), cardParams())
+        val templates = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        PassTemplate.entries.forEach { template ->
+            val button = productButton(template.title.lowercase().replaceFirstChar(Char::titlecase), primary = false) {
+                applyPassTemplate(template)
+            }
+            templateButtons[template] = button
+            templates.addView(button, weightedParams())
+        }
+        studioCreateContent.addView(templates, actionParams())
+        selectedTemplateText = productBody("Staff · Ongoing access, non-transferable").apply { textSize = 13f }
+        studioCreateContent.addView(selectedTemplateText, cardParams())
+        studioFormFields = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        studioCreateContent.addView(studioFormFields, matchWrapParams())
+        val identityCard = productCard()
+        identityCard.addView(formHeading("1  Pass & recipient"), cardParams())
+        identityCard.addView(formLabel("Pass label"), matchWrapParams())
+        passLabelInput = studioInput("visitor-001")
+        identityCard.addView(passLabelInput, matchWrapParams())
+        derivedNameText = productBody("staff-new.${IssuerSpace.namespace}").apply {
+            textSize = 12f
+            setPadding(0, dp(6), 0, dp(14))
+        }
+        identityCard.addView(derivedNameText, matchWrapParams())
+        passLabelInput.setOnFocusChangeListener { _, _ -> updateDerivedPassName() }
+        identityCard.addView(formLabel("Recipient address"), matchWrapParams())
+        passRecipientInput = studioInput("0x…").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 2
+            textSize = 14f
+            setTypeface(Typeface.MONOSPACE)
+        }
+        identityCard.addView(passRecipientInput, matchWrapParams())
+        studioFormFields.addView(identityCard, cardParams())
+
+        val accessCard = productCard()
+        accessCard.addView(formHeading("2  Access & dates", "All dates use Europe/Madrid."), cardParams())
+        accessCard.addView(formLabel("Registration ends"), matchWrapParams())
+        registrationExpiryInput = studioDateInput("Registration ends")
+        accessCard.addView(registrationExpiryInput, cardParams())
+        accessCard.addView(formLabel("Access ends"), matchWrapParams())
+        accessValidUntilInput = studioDateInput("Access ends")
+        accessCard.addView(accessValidUntilInput, cardParams())
+        accessActiveInput = CheckBox(this).apply {
+            text = "Access active from the start"; setTextColor(textPrimaryColor()); textSize = 14f; minHeight = dp(48)
+        }
+        transferableInput = CheckBox(this).apply {
+            text = "Holder can transfer this pass"; setTextColor(textPrimaryColor()); textSize = 14f; minHeight = dp(48)
+        }
+        accessCard.addView(accessActiveInput, matchWrapParams())
+        accessCard.addView(transferableInput, matchWrapParams())
+        studioFormFields.addView(accessCard, cardParams())
+
+        val appearanceCard = productCard()
+        appearanceCard.addView(formHeading("3  Presentation"), cardParams())
+        appearanceCard.addView(formLabel("Description"), matchWrapParams())
+        descriptionInput = studioInput("Pass description").apply { maxLines = 4 }
+        appearanceCard.addView(descriptionInput, cardParams())
+        val artworkFields = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        artworkInput = studioInput("https:// or ipfs://").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        }
+        artworkFields.addView(formLabel("Artwork URL · optional"), matchWrapParams())
+        artworkFields.addView(artworkInput, matchWrapParams())
+        appearanceCard.addView(disclosureButton("Artwork", "Add an image URL", artworkFields), matchWrapParams())
+        appearanceCard.addView(artworkFields, matchWrapParams())
+        studioFormFields.addView(appearanceCard, cardParams())
+        createReviewButton = productButton("Review pass", action = ::reviewCredential)
+        studioFormFields.addView(createReviewButton, actionParams())
+        studioFormFields.addView(productBody("Next: check the exact details before confirming in your wallet.").apply {
+            textSize = 12f; gravity = Gravity.CENTER; setPadding(dp(8), 0, dp(8), dp(16))
+        }, matchWrapParams())
+
+        studioManageContent.addView(formHeading("Your manageable passes", "Update access, presentation or registration."), cardParams())
+        managePassesContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        managePassesContainer.addView(productBody("Finding passes…"), cardParams())
+        studioManageContent.addView(managePassesContainer, matchWrapParams())
+        showStudioMode(false, resetScroll = false)
         authenticatedView.addView(issuerProductSection, matchWrapParams())
 
         settingsSection = LinearLayout(this).apply {
@@ -624,6 +745,178 @@ class MainActivity : Activity() {
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 
+    private fun formHeading(title: String, subtitle: String? = null) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(productHeading(title).apply { textSize = 17f }, matchWrapParams())
+        if (subtitle != null) addView(productBody(subtitle).apply {
+            textSize = 13f; setPadding(0, dp(4), 0, 0)
+        }, matchWrapParams())
+    }
+
+    private fun formLabel(label: String) = productBody(label).apply {
+        textSize = 13f
+        setTextColor(textSecondaryColor())
+        setPadding(0, 0, 0, dp(6))
+    }
+
+    private fun studioInput(hint: String) = productInput(hint).apply {
+        textSize = 15f
+        background = roundedBackground(pageColor(), dp(12).toFloat(), borderColor())
+        backgroundTintList = null
+        setPadding(dp(12), dp(12), dp(12), dp(12))
+    }
+
+    private fun studioDateInput(label: String) = studioInput("Choose date and time").apply {
+        isFocusable = false
+        isCursorVisible = false
+        keyListener = null
+        setSingleLine(true)
+        setCompoundDrawablesWithIntrinsicBounds(0, 0, android.R.drawable.ic_menu_my_calendar, 0)
+        compoundDrawableTintList = ColorStateList.valueOf(textSecondaryColor())
+        compoundDrawablePadding = dp(10)
+        contentDescription = "$label · Europe/Madrid · Choose date and time"
+        setOnClickListener {
+            if (writeCoordinator.isBusy()) return@setOnClickListener
+            val binding = writeCoordinator.currentWallet()
+            val initial = runCatching {
+                Instant.ofEpochSecond(StudioTime.parse(text.toString()).longValueExact()).atZone(StudioTime.zone)
+            }.getOrElse { Instant.now().atZone(StudioTime.zone) }
+            DatePickerDialog(this@MainActivity, { _, year, month, day ->
+                if (!writeCoordinator.isBusy() && writeCoordinator.currentWallet() == binding) {
+                    TimePickerDialog(this@MainActivity, { _, hour, minute ->
+                        if (!writeCoordinator.isBusy() && writeCoordinator.currentWallet() == binding) {
+                            val input = DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm", java.util.Locale.ROOT)
+                                .format(LocalDateTime.of(year, month + 1, day, hour, minute))
+                            runCatching { StudioTime.parse(input) }.onSuccess { value ->
+                                setText(StudioTime.input(value))
+                                error = null
+                            }.onFailure { failure ->
+                                val message = SafeActionFailurePolicy.from("Choose date", "ACTION", failure).humanMessage
+                                error = message
+                                AlertDialog.Builder(this@MainActivity).setTitle("Choose another time")
+                                    .setMessage(message).setPositiveButton("OK", null).show()
+                            }
+                        }
+                    }, initial.hour, initial.minute, true).apply {
+                        setTitle("$label · Europe/Madrid")
+                    }.show()
+                }
+            }, initial.year, initial.monthValue - 1, initial.dayOfMonth).apply {
+                setTitle("$label · Europe/Madrid")
+            }.show()
+        }
+    }
+
+    private fun disclosureButton(title: String, subtitle: String, content: View) =
+        productButton("+ $title · $subtitle", primary = false) {
+            content.visibility = if (content.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }.apply {
+            textSize = 13f
+            contentDescription = "$title, collapsed"
+            gravity = Gravity.START or Gravity.CENTER_VERTICAL
+            backgroundTintList = null
+            background = roundedBackground(Color.TRANSPARENT, dp(10).toFloat())
+            setOnClickListener {
+                val expanded = content.visibility != View.VISIBLE
+                content.visibility = if (expanded) View.VISIBLE else View.GONE
+                text = if (expanded) "− $title" else "+ $title · $subtitle"
+                contentDescription = "$title, ${if (expanded) "expanded" else "collapsed"}"
+            }
+        }
+
+    private fun showStudioMode(manage: Boolean, resetScroll: Boolean = true) {
+        studioCreateContent.visibility = if (manage) View.GONE else View.VISIBLE
+        studioManageContent.visibility = if (manage) View.VISIBLE else View.GONE
+        listOf(studioCreateTab to !manage, studioManageTab to manage).forEach { (button, selected) ->
+            button.isSelected = selected
+            button.backgroundTintList = null
+            button.background = roundedBackground(if (selected) surfaceColor() else Color.TRANSPARENT, dp(12).toFloat())
+            button.setTextColor(if (selected) accentColor() else textSecondaryColor())
+        }
+        if (resetScroll) resetProductScroll()
+    }
+
+    private fun updateTemplatePresentation(template: PassTemplate) {
+        selectedTemplateText.text = when (template) {
+            PassTemplate.STAFF -> "Staff · Ongoing access, non-transferable"
+            PassTemplate.VISITOR -> "Visitor · Short stay, transferable"
+            PassTemplate.CONTRACTOR -> "Contractor · Starts suspended, non-transferable"
+        }
+        templateButtons.forEach { (preset, button) ->
+            val selected = preset == template
+            button.isSelected = selected
+            button.backgroundTintList = null
+            button.background = roundedBackground(if (selected) surfaceMutedColor() else surfaceColor(), dp(12).toFloat(),
+                if (selected) accentColor() else borderColor())
+            button.setTextColor(if (selected) accentColor() else textSecondaryColor())
+        }
+    }
+
+    private fun applyPassTemplate(template: PassTemplate) {
+        val recipient = ethereumWallet?.address ?: passRecipientInput.text.toString()
+            .takeIf { runCatching { CredentialValidation.requireNonZeroAddress(it) }.isSuccess }
+            ?: IssuerSpace.STAFF_HOLDER
+        val draft = PassTemplateDefaults.apply(
+            template,
+            recipient,
+            BigInteger.valueOf(System.currentTimeMillis() / 1_000L),
+            BigInteger.valueOf(IssuerSpace.namespaceExpiry),
+        )
+        selectedTemplate = template
+        updateTemplatePresentation(template)
+        passLabelInput.setText(draft.label)
+        passRecipientInput.setText(draft.recipient)
+        registrationExpiryInput.setText(formatDraftTime(draft.registrationExpiry))
+        accessValidUntilInput.setText(formatDraftTime(draft.accessValidUntil))
+        accessActiveInput.isChecked = draft.accessActive
+        transferableInput.isChecked = draft.transferable
+        descriptionInput.setText(draft.description)
+        artworkInput.setText(draft.artworkUri)
+        updateDerivedPassName()
+    }
+
+    private fun updateDerivedPassName() {
+        val label = passLabelInput.text.toString().trim().lowercase()
+        derivedNameText.text = if (runCatching { CredentialValidation.normalizeLabel(label) }.isSuccess) {
+            "$label.${IssuerSpace.namespace}"
+        } else {
+            "Enter a valid label (letters, numbers, and hyphens; no dots)."
+        }
+        if (::resumeSetupButton.isInitialized) renderSelectedIssuance()
+    }
+
+    private fun renderSelectedIssuance() {
+        val session = ethereumWallet?.address?.let(::selectedIssuance)
+        if (session != null) renderIssuance(session) else {
+            studioFormFields.visibility = View.VISIBLE
+            studioSavedSummary.visibility = View.GONE
+            createReviewButton.visibility = if (studioCapabilities.canIssue == IssuerCapabilityState.ALLOWED) View.VISIBLE else View.GONE
+            resumeSetupButton.visibility = View.GONE
+            copyCredentialButton.visibility = View.GONE
+            productStatusText.visibility = View.GONE
+        }
+    }
+
+    private fun readPassDraft(): PassDraft {
+        val now = BigInteger.valueOf(System.currentTimeMillis() / 1_000L)
+        val namespaceExpiry = studioCapabilities.namespaceExpiry
+            ?: BigInteger.valueOf(IssuerSpace.namespaceExpiry)
+        return PassDraft(
+            template = selectedTemplate,
+            label = passLabelInput.text.toString(),
+            recipient = passRecipientInput.text.toString(),
+            registrationExpiry = parseDraftTime(registrationExpiryInput.text.toString()),
+            accessActive = accessActiveInput.isChecked,
+            accessValidUntil = parseDraftTime(accessValidUntilInput.text.toString()),
+            transferable = transferableInput.isChecked,
+            description = descriptionInput.text.toString(),
+            artworkUri = artworkInput.text.toString(),
+        ).validated(now, namespaceExpiry)
+    }
+
+    private fun formatDraftTime(value: BigInteger): String = StudioTime.input(value)
+    private fun parseDraftTime(value: String): BigInteger = StudioTime.parse(value)
+
     private fun isDarkMode(): Boolean =
         resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
 
@@ -721,6 +1014,7 @@ class MainActivity : Activity() {
     }
 
     private fun productButton(textValue: String, primary: Boolean = true, action: () -> Unit) = Button(this).apply {
+        isEnabled = !writeCoordinator.isBusy()
         text = textValue
         isAllCaps = false
         textSize = 15f
@@ -870,11 +1164,11 @@ class MainActivity : Activity() {
     }
 
     private fun showDestination(destination: ProductDestination) {
-        if (destination == ProductDestination.ISSUER && !issuerCapabilityConfirmed) return
+        if (destination == ProductDestination.STUDIO && !issuerCapabilityConfirmed && !hasIncompleteStudioWork()) return
         currentDestination = destination
         navigationBar.visibility = if (destination == ProductDestination.DIAGNOSTICS) View.GONE else View.VISIBLE
         myKeysSection.visibility = if (destination == ProductDestination.MY_KEYS) View.VISIBLE else View.GONE
-        issuerProductSection.visibility = if (destination == ProductDestination.ISSUER) View.VISIBLE else View.GONE
+        issuerProductSection.visibility = if (destination == ProductDestination.STUDIO) View.VISIBLE else View.GONE
         settingsSection.visibility = if (destination == ProductDestination.SETTINGS) View.VISIBLE else View.GONE
         diagnosticsSection.visibility = if (destination == ProductDestination.DIAGNOSTICS) View.VISIBLE else View.GONE
         shellFeedbackText.visibility = View.GONE
@@ -886,13 +1180,13 @@ class MainActivity : Activity() {
                 if (destination == ProductDestination.MY_KEYS) selected else idle,
             )
             issuerNavButton.backgroundTintList = ColorStateList.valueOf(
-                if (destination == ProductDestination.ISSUER) selected else idle,
+                if (destination == ProductDestination.STUDIO) selected else idle,
             )
             settingsNavButton.backgroundTintList = ColorStateList.valueOf(
                 if (destination == ProductDestination.SETTINGS) selected else idle,
             )
             myKeysNavButton.setTextColor(if (destination == ProductDestination.MY_KEYS) Color.WHITE else textPrimaryColor())
-            issuerNavButton.setTextColor(if (destination == ProductDestination.ISSUER) Color.WHITE else textPrimaryColor())
+            issuerNavButton.setTextColor(if (destination == ProductDestination.STUDIO) Color.WHITE else textPrimaryColor())
             settingsNavButton.setTextColor(if (destination == ProductDestination.SETTINGS) Color.WHITE else textPrimaryColor())
         }
         if (destination == ProductDestination.MY_KEYS) {
@@ -1033,7 +1327,7 @@ class MainActivity : Activity() {
                 addView(valueRow("Description", snapshot.description.orEmpty().ifBlank { "Not set" }), matchWrapParams())
                 addView(valueRow("Transferability", if (snapshot.transferable == false) "Non-transferable" else "Transferable"), matchWrapParams())
                 addView(valueRow("Current owner", snapshot.owner.orEmpty()), matchWrapParams())
-                addView(valueRow("Issuer registry", ProductShellPolicy.compactAddress(snapshot.registry)), matchWrapParams())
+                addView(valueRow("Product registry", ProductShellPolicy.compactAddress(snapshot.registry)), matchWrapParams())
                 addView(valueRow("Provenance", if (snapshot.provenanceMatches) "Verified" else "Unavailable"), matchWrapParams())
                 addView(valueRow("Artwork URI", artwork.ifBlank { "Not set" }), matchWrapParams())
             }
@@ -1105,7 +1399,7 @@ class MainActivity : Activity() {
 
     private fun formatPassExpiry(expiry: BigInteger?): String = expiry?.let {
         runCatching {
-            PASS_DATE_FORMAT.format(Instant.ofEpochSecond(it.longValueExact()).atZone(ZoneId.systemDefault()))
+            PASS_DATE_FORMAT.format(Instant.ofEpochSecond(it.longValueExact()).atZone(StudioTime.zone)) + " Europe/Madrid"
         }.getOrNull()
     } ?: "Unavailable"
 
@@ -1115,20 +1409,20 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         header.addView(TextView(this@MainActivity).apply {
-            text = "SA"
+            text = review.template.take(2)
             gravity = Gravity.CENTER
             textSize = 18f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
             background = roundedBackground(accentColor(), dp(14).toFloat())
-            contentDescription = "Staff access artwork placeholder"
+            contentDescription = "${review.template.lowercase()} pass artwork placeholder"
         }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginEnd = dp(14) })
-        header.addView(productCaption("STAFF ACCESS"), LinearLayout.LayoutParams(
+        header.addView(productCaption("${review.template} PASS"), LinearLayout.LayoutParams(
             0,
             ViewGroup.LayoutParams.WRAP_CONTENT,
             1f,
         ))
-        header.addView(statusChip(review.access.uppercase(), positive = true), LinearLayout.LayoutParams(dp(110), dp(34)))
+        header.addView(statusChip(review.access.uppercase(), positive = review.access == "Allowed"), LinearLayout.LayoutParams(dp(110), dp(34)))
         addView(header, matchWrapParams())
         addView(productHeading(review.credential).apply {
             textSize = 16f
@@ -1138,23 +1432,31 @@ class MainActivity : Activity() {
     }
 
     private fun reviewRow(label: String, value: String) = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        minimumHeight = dp(48)
-        addView(productCaption(label.uppercase()), LinearLayout.LayoutParams(dp(112), ViewGroup.LayoutParams.WRAP_CONTENT))
-        addView(productBody(value).apply {
+        val address = value.startsWith("0x") && value.length == 42
+        val stacked = address || value.contains("Europe/Madrid")
+        orientation = if (stacked) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        gravity = Gravity.TOP
+        setPadding(0, dp(8), 0, dp(8))
+        val caption = formLabel(label).apply { textSize = 13f }
+        if (stacked) addView(caption, matchWrapParams()) else addView(caption,
+            LinearLayout.LayoutParams(dp(106), ViewGroup.LayoutParams.WRAP_CONTENT))
+        val body = productBody(value).apply {
+            textSize = if (address) 13f else 14f
             setTextColor(textPrimaryColor())
-            gravity = Gravity.END
-            maxLines = 2
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            if (address) { setTypeface(Typeface.MONOSPACE); setTextIsSelectable(true) }
+            gravity = if (stacked) Gravity.START else Gravity.END
+        }
+        if (stacked) addView(body, matchWrapParams()) else addView(body,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     }
 
     private fun exactReviewField(label: String, value: String, monospace: Boolean = false) =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, dp(5), 0, dp(7))
-            addView(productCaption(label.uppercase()), matchWrapParams())
+            setPadding(0, dp(6), 0, dp(8))
+            addView(formLabel(label), matchWrapParams())
             addView(productBody(value).apply {
+                textSize = if (monospace) 13f else 14f
                 setTextColor(textPrimaryColor())
                 setTextIsSelectable(true)
                 if (monospace) setTypeface(Typeface.MONOSPACE)
@@ -1162,13 +1464,15 @@ class MainActivity : Activity() {
         }
 
     private fun exactReviewDetails(review: StaffReviewPresentation) = productCard().apply {
-        addView(productCaption("EXACT TRANSACTION DETAILS"), matchWrapParams())
+        addView(formHeading("Exact details"), cardParams())
         addView(exactReviewField("Credential", review.credential), matchWrapParams())
         addView(exactReviewField("Recipient", review.exactRecipient, monospace = true), matchWrapParams())
         addView(exactReviewField("Issuing wallet", review.issuingWallet, monospace = true), matchWrapParams())
         addView(exactReviewField("Access", review.access), matchWrapParams())
-        addView(exactReviewField("Expiry", review.exactExpiry), matchWrapParams())
-        addView(exactReviewField("UTC", review.utcExpiry, monospace = true), matchWrapParams())
+        addView(exactReviewField("Registration expiry", review.exactExpiry), matchWrapParams())
+        addView(exactReviewField("Registration UTC", review.utcExpiry, monospace = true), matchWrapParams())
+        addView(exactReviewField("Access valid until", review.accessExpiry), matchWrapParams())
+        addView(exactReviewField("Access UTC", review.accessUtcExpiry, monospace = true), matchWrapParams())
         addView(exactReviewField("Transferability", review.transferability), matchWrapParams())
         addView(exactReviewField("Network", review.network), matchWrapParams())
     }
@@ -1183,24 +1487,25 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(20), dp(20), dp(16))
             background = roundedBackground(surfaceColor(), dp(24).toFloat(), borderColor())
-            addView(productHeading(if (recordsOnly) "Configure credential" else "Review credential").apply {
+            addView(productHeading(if (recordsOnly) "Configure pass" else "Review pass").apply {
                 textSize = 23f
                 setPadding(0, 0, 0, dp(14))
             }, matchWrapParams())
         }
         val details = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            if (recordsOnly) addView(reviewRow("Existing credential", review.credential), matchWrapParams())
             addView(reviewPreviewCard(review), cardParams())
-            addView(reviewRow("Recipient", if (recordsOnly) review.exactRecipient else review.recipient), matchWrapParams())
+            addView(reviewRow("Recipient", review.exactRecipient), matchWrapParams())
+            addView(reviewRow("Issuing wallet", review.issuingWallet), matchWrapParams())
             addView(reviewRow("Access", review.access), matchWrapParams())
             addView(reviewRow(
-                "Valid until",
+                "Registration until",
                 if (recordsOnly) review.exactExpiry else review.expires.replace(", ", " · "),
             ), matchWrapParams())
+            addView(reviewRow("Access valid until", review.accessExpiry), matchWrapParams())
             addView(reviewRow("Transfer", review.transferability), matchWrapParams())
-            addView(reviewRow("Description", review.description), matchWrapParams())
-            addView(reviewRow("Artwork", review.artwork), matchWrapParams())
+            addView(exactReviewField("Description", review.description), matchWrapParams())
+            if (review.artwork != "Not set") addView(exactReviewField("Artwork", review.artwork), matchWrapParams())
             addView(reviewRow("Network", review.network), matchWrapParams())
             val exactDetails = exactReviewDetails(review).apply { visibility = View.GONE }
             lateinit var exactToggle: Button
@@ -1213,12 +1518,9 @@ class MainActivity : Activity() {
             addView(exactDetails, cardParams())
             addView(productBody(
                 if (recordsOnly) {
-                    "The credential is already created. This does not register it again.\n\n" +
-                        "Purpose: ${CredentialConfigurationPolicy.PURPOSE}"
+                    "Registration is confirmed. This step configures the access and presentation records shown above."
                 } else {
-                    "Creation requires two Sepolia transactions:\n" +
-                        "1. ${review.transactionPurposes[0]}\n" +
-                        "2. ${review.transactionPurposes[1]}"
+                    "Two wallet confirmations are needed: create the pass, then configure access. You will review each step."
                 },
             ).apply {
                 setTextColor(textPrimaryColor())
@@ -1226,7 +1528,7 @@ class MainActivity : Activity() {
                 background = roundedBackground(surfaceMutedColor(), dp(14).toFloat())
             }, cardParams())
         }
-        panel.addView(ScrollView(this).apply { addView(details) }, LinearLayout.LayoutParams(
+        panel.addView(ScrollView(this).apply { isFillViewport = true; addView(details) }, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             0,
             1f,
@@ -1297,6 +1599,7 @@ class MainActivity : Activity() {
 
     private fun logout() {
         runAction("Logging out…") {
+            writeCoordinator.clearWallet()
             gateBApplication.privy.logout()
             currentUser = null
             ethereumWallet = null
@@ -1375,6 +1678,7 @@ class MainActivity : Activity() {
     }
 
     private fun selectWallet(wallet: EmbeddedEthereumWallet, status: String) {
+        val binding = writeCoordinator.select(wallet.address, walletProviderId(wallet))
         val model = ActiveWalletPolicy.requireSelectable(authenticatedWallets.map(::walletModel), wallet.address)
         activeWalletStore.save(model)
         ethereumWallet = wallet
@@ -1382,6 +1686,7 @@ class MainActivity : Activity() {
         credentialRefreshJob = null
         issuerCapabilityConfirmed = false
         issuerCapabilityState = IssuerCapabilityState.UNAVAILABLE
+        studioCapabilities = StudioCapabilities.unavailable("WALLET_CHANGED")
         val header = GlobalWalletHeaderPolicy.presentation(wallet.address)
         shellIdentityText.text = header.address
         shellWalletArea.contentDescription = "Active wallet ${header.address}. Choose wallet"
@@ -1398,6 +1703,7 @@ class MainActivity : Activity() {
         clearSignature()
         resetMobileIssuerAdmission(wallet)
         contractRunner = ContractTransactionRunner(
+            identity = StudioRunnerIdentity(binding, IssuerSpace.chainId),
             walletProvider = object : MobileIssuerWalletProvider {
                 override suspend fun switchToSepolia() = wallet.provider.switchChain(EthereumChain.Sepolia)
                 override suspend fun sendTransaction(transactionJson: String): String = wallet.provider.request(
@@ -1407,8 +1713,11 @@ class MainActivity : Activity() {
             client = credentialRpcClient,
             engine = credentialTransactionEngine,
         )
+        applyPassTemplate(PassTemplate.STAFF)
+        showStudioMode(false, resetScroll = false)
         refreshProduct(wallet.address)
         showAuthenticatedShell()
+        setBusy(false)
         showStatus(status)
     }
 
@@ -1417,6 +1726,9 @@ class MainActivity : Activity() {
         providerIdentity = wallet.id,
         hdWalletIndex = wallet.hdWalletIndex,
     )
+
+    private fun walletProviderId(wallet: EmbeddedEthereumWallet) =
+        wallet.id ?: "embedded:${wallet.address.lowercase()}:${wallet.hdWalletIndex}"
 
     private fun renderWallets() {
         settingsWalletCountText.text = when (authenticatedWallets.size) {
@@ -1428,6 +1740,7 @@ class MainActivity : Activity() {
     }
 
     private fun showWalletSelector() {
+        if (writeCoordinator.isBusy()) return
         val models = authenticatedWallets.map(::walletModel)
         val presentation = WalletPickerPolicy.presentation(models, ethereumWallet?.address)
         lateinit var dialog: AlertDialog
@@ -1496,6 +1809,7 @@ class MainActivity : Activity() {
     }
 
     private fun resetMobileIssuerAdmission(wallet: EmbeddedEthereumWallet) {
+        val binding = checkNotNull(writeCoordinator.currentWallet())
         m1ReadinessJob?.cancel()
         m1ReadinessJob = null
         m1ReadinessGate.confirmationChanged(false)
@@ -1511,10 +1825,10 @@ class MainActivity : Activity() {
                 wallet.provider.switchChain(EthereumChain.Sepolia)
             }
 
-            override suspend fun sendTransaction(transactionJson: String): String =
-                wallet.provider.request(
-                    EthereumRpcRequest.ethSendTransaction(transactionJson),
-                ).getOrThrow().data
+            override suspend fun sendTransaction(transactionJson: String): String {
+                writeCoordinator.requireActiveWallet(binding)
+                return wallet.provider.request(EthereumRpcRequest.ethSendTransaction(transactionJson)).getOrThrow().data
+            }
         }
         m1Runner = MobileIssuerAdmissionRunner(
             provider = provider,
@@ -1562,255 +1876,569 @@ class MainActivity : Activity() {
     private fun refreshProduct(walletAddress: String) {
         if (credentialRefreshJob?.isActive == true) return
         credentialRefreshJob = activityScope.launch {
-            val capability = credentialReader.issuerCapability(walletAddress)
+            val capability = credentialReader.studioCapabilities(walletAddress)
             if (ethereumWallet?.address?.equals(walletAddress, true) != true) return@launch
-            issuerCapabilityState = capability.state
-            issuerCapabilityConfirmed = capability.allowed
-            issuerNavButton.visibility = if (capability.allowed) View.VISIBLE else View.GONE
+            studioCapabilities = capability
+            issuerCapabilityState = capability.canIssue
+            issuerCapabilityConfirmed = capability.visible
+            issuerNavButton.visibility = if (capability.visible || hasIncompleteStudioWork()) View.VISIBLE else View.GONE
             shellIdentityText.text = GlobalWalletHeaderPolicy.presentation(walletAddress).address
-            capabilityStatusText.text = WalletCapabilityPresentation.issuerLabel(capability.state)
-            if (!capability.allowed && currentDestination == ProductDestination.ISSUER) {
+            capabilityStatusText.text = if (capability.visible) "Studio capabilities verified" else when {
+                listOf(capability.canIssue, capability.canRenew, capability.canManageAccess, capability.canManagePresentation)
+                    .all { it == IssuerCapabilityState.UNAVAILABLE } -> "Studio capabilities unavailable"
+                else -> "No Studio capabilities"
+            }
+            studioCapabilityText.text = studioCapabilitySummary(capability)
+            createReviewButton.visibility = if (capability.canIssue == IssuerCapabilityState.ALLOWED) View.VISIBLE else View.GONE
+            if (!capability.visible && !hasIncompleteStudioWork() && currentDestination == ProductDestination.STUDIO) {
                 showDestination(ProductDestination.MY_KEYS)
             }
-            if (capability.allowed) {
-                productStatusText.visibility = View.GONE
+            if (!writeCoordinator.isBusy()) {
+                val binding = writeCoordinator.currentWallet() ?: return@launch
+                val lease = writeCoordinator.acquire(binding)
                 try {
                     recoverIssuance(walletAddress)
-                } catch (error: Throwable) {
-                    val stage = if (issuanceCoordinator.current(walletAddress)?.state ==
-                        IssuanceState.AUTHORITATIVE_READBACK
-                    ) "FINAL_READBACK" else "RECOVERY"
-                    showSafeFailure("Verify credential", error, stage)
-                }
+                    recoverManagement(walletAddress)
+                } catch (error: CancellationException) { throw error
+                } catch (error: Throwable) { showSafeFailure("Recover Studio", error, "RECOVERY")
+                } finally { writeCoordinator.release(lease) }
             }
+            renderIssuanceSessions(walletAddress)
+            if (capability.visible) refreshManagePasses(walletAddress)
             refreshMyKeysInternal(walletAddress)
         }
     }
 
-    private fun reviewCredential() {
-        val wallet = ethereumWallet ?: return showStatus("Log in and prepare an Ethereum wallet first.")
-        runAction("Checking issuer authority and credential availability…") {
-            val existing = issuanceCoordinator.current(wallet.address)
-            if (existing != null && existing.state !in setOf(IssuanceState.DRAFT, IssuanceState.REGISTER_READY)) {
-                renderIssuance(existing)
-                showStatus("An issuance is already in progress. Resume it instead of registering again.")
-                return@runAction
+    private fun studioCapabilitySummary(value: StudioCapabilities): String {
+        val capabilities = listOf("Create" to value.canIssue, "Access" to value.canManageAccess,
+            "Presentation" to value.canManagePresentation, "Renew" to value.canRenew)
+        val allowed = capabilities.filter { it.second == IssuerCapabilityState.ALLOWED }.map { it.first }
+        val unavailable = capabilities.any { it.second == IssuerCapabilityState.UNAVAILABLE }
+        return if (allowed.isEmpty()) {
+            if (unavailable) "Wallet permissions unavailable · Saved work can still be recovered" else "No management permissions for this wallet"
+        } else "Wallet permissions: ${allowed.joinToString(" · ")}" + if (unavailable) " · Some checks unavailable" else ""
+    }
+
+    private suspend fun refreshManagePasses(walletAddress: String) {
+        when (val result = credentialDiscovery.discoverManageable()) {
+            is CredentialDiscoveryResult.Unavailable -> {
+                managePassesContainer.removeAllViews()
+                managePassesContainer.addView(productBody("Manage Passes is temporarily unavailable."), cardParams())
             }
-            val review = CredentialReviewPolicy.prepare(artworkInput.text.toString())
-            val request = registerRequest(wallet.address)
-            preflightRegister(request)
+            is CredentialDiscoveryResult.Available -> {
+                if (ethereumWallet?.address?.equals(walletAddress, true) != true) return
+                val manageable = result.credentials.filter {
+                    PassManagementPolicy.actions(it, studioCapabilities).isNotEmpty()
+                }
+                managePassesContainer.removeAllViews()
+                if (manageable.isEmpty()) {
+                    managePassesContainer.addView(productBody("No manageable product passes found."), cardParams())
+                } else {
+                    manageable.forEach { managePassesContainer.addView(managePassCard(it), cardParams()) }
+                }
+            }
+        }
+    }
+
+    private fun managePassCard(snapshot: CredentialSnapshot) = productCard().apply {
+        val actions = PassManagementPolicy.actions(snapshot, studioCapabilities)
+        addView(productHeading(snapshot.fullName).apply { textSize = 17f }, matchWrapParams())
+        addView(statusChip(StudioAccessPolicy.status(snapshot), positive = snapshot.authoritativeAllowed).apply {
+            setPadding(dp(12), 0, dp(12), 0)
+        },
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(32)).apply {
+                topMargin = dp(10); bottomMargin = dp(12)
+            })
+        addView(reviewRow("Access ends", formatPassExpiry(snapshot.accessValidUntil)), matchWrapParams())
+        addView(reviewRow("Registration ends", formatPassExpiry(snapshot.registryExpiry)), matchWrapParams())
+        addView(reviewRow("Transfer", if (snapshot.transferable == true) "Transferable" else "Non-transferable"), matchWrapParams())
+        val savedDetails = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            addView(exactReviewField("Owner", snapshot.owner ?: "Unavailable", monospace = true), matchWrapParams())
+            addView(exactReviewField("Description", snapshot.description.orEmpty().ifBlank { "Not set" }), matchWrapParams())
+            addView(exactReviewField("Artwork", snapshot.avatarUri.orEmpty().ifBlank { "Not set" }), matchWrapParams())
+        }
+        addView(disclosureButton("Pass details", "Owner, description & artwork", savedDetails), matchWrapParams())
+        addView(savedDetails, matchWrapParams())
+        val controls = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            if (StudioActionType.ACCESS_SUSPEND in actions) {
+                addView(productButton("Suspend", primary = false) {
+                    reviewManagement(snapshot, PassManagementPolicy.access(
+                        snapshot, false, snapshot.accessValidUntil ?: return@productButton,
+                        checkNotNull(snapshot.snapshotTimestamp),
+                    ))
+                }, actionParams())
+            }
+            if (StudioActionType.ACCESS_RESTORE in actions) {
+                val canRestore = snapshot.accessValidUntil?.let {
+                    it > checkNotNull(snapshot.snapshotTimestamp)
+                } == true
+                addView(productButton(if (canRestore) "Restore" else "Change validity before restoring", primary = false) {
+                    if (!canRestore) return@productButton
+                    reviewManagement(snapshot, PassManagementPolicy.access(
+                        snapshot, true, snapshot.accessValidUntil!!,
+                        checkNotNull(snapshot.snapshotTimestamp),
+                    ))
+                }.apply { isEnabled = canRestore && !writeCoordinator.isBusy() }, actionParams())
+            }
+            if (StudioActionType.ACCESS_VALIDITY in actions) {
+                addView(productButton("Change access validity", primary = false) { showAccessValidityDialog(snapshot) }, actionParams())
+            }
+            if (StudioActionType.PRESENTATION_UPDATE in actions) {
+                addView(productButton("Change artwork / description", primary = false) {
+                    showPresentationDialog(snapshot)
+                }, actionParams())
+            }
+            if (StudioActionType.REGISTRATION_RENEW in actions) {
+                addView(productButton("Extend registration", primary = false) { showRenewDialog(snapshot) }, actionParams())
+            }
+        }
+        addView(disclosureButton("Manage pass", "Access & settings", controls), matchWrapParams())
+        addView(controls, matchWrapParams())
+    }
+
+    private fun showAccessValidityDialog(snapshot: CredentialSnapshot) {
+        val input = studioDateInput("Date and time").apply {
+            setText(formatDraftTime(snapshot.accessValidUntil ?: snapshot.registryExpiry ?: BigInteger.ZERO))
+        }
+        val keepActive = CheckBox(this).apply {
+            text = "Access allowed"
+            isChecked = snapshot.accessActive == true
+            setTextColor(textPrimaryColor())
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), 0, dp(20), 0)
+            addView(productBody("Access validity can be earlier than registration expiry."), matchWrapParams())
+            addView(input, matchWrapParams())
+            addView(keepActive, matchWrapParams())
+        }
+        AlertDialog.Builder(this).setTitle("Change access validity").setView(panel)
+            .setNegativeButton("Back", null)
+            .setPositiveButton("Review") { _, _ ->
+                runCatching {
+                    PassManagementPolicy.access(
+                        snapshot, keepActive.isChecked, parseDraftTime(input.text.toString()),
+                        checkNotNull(snapshot.snapshotTimestamp),
+                    )
+                }.onSuccess { reviewManagement(snapshot, it) }
+                    .onFailure { showSafeFailure("Change access validity", it) }
+            }.show()
+    }
+
+    private fun showPresentationDialog(snapshot: CredentialSnapshot) {
+        val description = productInput("Description").apply {
+            setText(snapshot.description.orEmpty()); setSingleLine(false); maxLines = 3
+        }
+        val artwork = productInput("https:// or ipfs://").apply { setText(snapshot.avatarUri.orEmpty()) }
+        val removeArtwork = CheckBox(this).apply { text = "Remove artwork"; setTextColor(textPrimaryColor()) }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), 0, dp(20), 0)
+            addView(productCaption("DESCRIPTION"), matchWrapParams())
+            addView(description, matchWrapParams())
+            addView(productCaption("ARTWORK URI"), matchWrapParams())
+            addView(artwork, matchWrapParams())
+            addView(removeArtwork, matchWrapParams())
+        }
+        AlertDialog.Builder(this).setTitle("Change presentation").setView(panel)
+            .setNegativeButton("Back", null)
+            .setPositiveButton("Review") { _, _ ->
+                runCatching {
+                    PassManagementPolicy.presentation(
+                        snapshot,
+                        description.text.toString().takeIf { it != snapshot.description.orEmpty() },
+                        artwork.text.toString().takeIf { !removeArtwork.isChecked && it != snapshot.avatarUri.orEmpty() },
+                        removeArtwork.isChecked,
+                    )
+                }.onSuccess { reviewManagement(snapshot, it) }
+                    .onFailure { showSafeFailure("Change presentation", it) }
+            }.show()
+    }
+
+    private fun showRenewDialog(snapshot: CredentialSnapshot) {
+        val input = studioDateInput("Date and time").apply {
+            setText(formatDraftTime(snapshot.registryExpiry ?: BigInteger.ZERO))
+        }
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), 0, dp(20), 0)
+            addView(productBody("Registration expiry can only increase. Access validity will not change."), matchWrapParams())
+            addView(input, matchWrapParams())
+        }
+        AlertDialog.Builder(this).setTitle("Extend registration").setView(panel)
+            .setNegativeButton("Back", null)
+            .setPositiveButton("Review") { _, _ ->
+                runCatching {
+                    PassManagementPolicy.renew(
+                        snapshot, parseDraftTime(input.text.toString()),
+                        studioCapabilities.namespaceExpiry ?: error("NAMESPACE_EXPIRY_MISSING"),
+                    )
+                }.onSuccess { reviewManagement(snapshot, it) }
+                    .onFailure { showSafeFailure("Extend registration", it) }
+            }.show()
+    }
+
+    private fun reviewManagement(snapshot: CredentialSnapshot, mutation: ManagementMutation) {
+        val binding = writeCoordinator.currentWallet() ?: return
+        if (writeCoordinator.isBusy()) return
+        try {
+            managementCoordinator.requireNoPending()
+            checkNotNull(contractRunner).requireReviewAvailable(ContractTransactionRequest(
+                StudioOperationIdentity.type(mutation.action, snapshot.fullName), binding.address, mutation.target, mutation.calldata))
+        } catch (error: Throwable) {
+            showSafeFailure("Review update", error)
+            renderIssuanceSessions(binding.address)
+            return
+        }
+        val body = "Wallet: ${binding.address}\nNetwork: Sepolia (11155111)\n${snapshot.fullName}\n\nCurrent\n${mutation.oldValue}\n\nNew\n${mutation.newValue}\n\n" +
+            "The wallet will be asked only after the final confirmation."
+        AlertDialog.Builder(this)
+            .setTitle(when (mutation.action) {
+                StudioActionType.ACCESS_SUSPEND -> "Review suspend"
+                StudioActionType.ACCESS_RESTORE -> "Review restore"
+                StudioActionType.ACCESS_VALIDITY -> "Review access validity"
+                StudioActionType.PRESENTATION_UPDATE -> "Review presentation"
+                StudioActionType.REGISTRATION_RENEW -> "Review registration extension"
+                else -> "Review action"
+            })
+            .setMessage(body)
+            .setNegativeButton("Back", null)
+            .setPositiveButton("Confirm & continue") { _, _ -> submitManagement(snapshot, mutation, binding) }
+            .show()
+    }
+
+    private fun submitManagement(snapshot: CredentialSnapshot, mutation: ManagementMutation, binding: StudioWalletBinding) {
+        val wallet = ethereumWallet ?: return
+        val runner = contractRunner ?: return
+        val request = ContractTransactionRequest(
+            StudioOperationIdentity.type(mutation.action, snapshot.fullName),
+            wallet.address,
+            mutation.target,
+            mutation.calldata,
+        )
+        runWriteAction(binding, "Rechecking pass before wallet approval…", mutation.action.name) { lease ->
+            managementCoordinator.requireNoPending()
+            val preflight: suspend () -> Unit = { preflightManagement(snapshot, mutation, request) }
+            runner.verifyNewSubmission(request, preflight)
+            val operation = runner.create(request)
+            val session = managementCoordinator.save(ManagementSession(wallet.address, snapshot.fullName, operation.operationId, mutation))
+            renderIssuanceSessions(wallet.address)
+            runner.review(operation.operationId)
+            val result = runner.submit(operation.operationId, request, preflight,
+                writePermit(lease, operation, snapshot.fullName, operation.operationId, mutation))
+            renderIssuanceSessions(wallet.address)
+            if (result.status == MobileIssuerStatus.CONFIRMED) {
+                ManagementFinalReadbackReconciler(credentialReader::read).finalize(session,
+                    checkNotNull(credentialTransactionEngine.find(operation.operationId)), managementCoordinator)
+                showStatus("Pass update confirmed and verified onchain.")
+                refreshManagePasses(wallet.address)
+            } else {
+                showStatus("The existing update attempt is being reconciled. It will not be submitted again blindly.")
+            }
+        }
+    }
+
+    private suspend fun recoverManagement(walletAddress: String) {
+        managementCoordinator.pending(walletAddress).forEach { recoverManagementSession(it) }
+    }
+
+    private suspend fun recoverManagementSession(session: ManagementSession) {
+        val operation = credentialTransactionEngine.find(session.operationId) ?: return
+        if (operation.state in setOf(
+                TransactionOperationState.REVERTED,
+                TransactionOperationState.CANCELLED,
+                TransactionOperationState.NO_BROADCAST_PROVEN,
+            )
+        ) {
+            managementCoordinator.clear(session.operationId)
+            return
+        }
+        val request = ContractTransactionRequest(
+            StudioOperationIdentity.type(session.mutation.action, session.fullName),
+            session.wallet,
+            session.mutation.target,
+            session.mutation.calldata,
+        )
+        val result = checkNotNull(contractRunner).recover(operation.operationId, request)
+        if (result.status == MobileIssuerStatus.CONFIRMED) {
+            ManagementFinalReadbackReconciler(credentialReader::read).finalize(session,
+                checkNotNull(credentialTransactionEngine.find(operation.operationId)), managementCoordinator)
+        } else if (result.category == "NO_BROADCAST_PROVEN") {
+            managementCoordinator.clear(session.operationId)
+            showStatus("The interrupted update was proven not broadcast. Review it again before a new attempt.")
+        }
+    }
+
+    private suspend fun preflightManagement(
+        reviewed: CredentialSnapshot,
+        mutation: ManagementMutation,
+        request: ContractTransactionRequest,
+    ) {
+        val capability = credentialReader.studioCapabilities(request.from)
+        val required = PassManagementPolicy.actions(reviewed, capability)
+        require(mutation.action in required) { "MANAGEMENT_AUTHORITY_MISSING" }
+        val current = credentialReader.read(reviewed.fullName)
+        StudioManagementPreflight.validate(reviewed, mutation, current,
+            capability.namespaceExpiry ?: error("NAMESPACE_EXPIRY_MISSING"))
+        require(request.data == mutation.calldata && request.to.equals(mutation.target, true)) { "WRITE_INTENT_MISMATCH" }
+        credentialReader.simulate(request.from, request.to, request.data)
+    }
+
+    private fun hasIncompleteStudioWork(): Boolean = ethereumWallet?.address?.let { wallet ->
+        issuanceCoordinator.list(wallet).any { it.state != IssuanceState.READY } || managementCoordinator.pending(wallet).isNotEmpty() ||
+            credentialTransactionEngine.preparedForWallet(wallet).isNotEmpty()
+    } == true
+
+    private fun selectedIssuance(wallet: String): IssuanceSession? = runCatching {
+        issuanceCoordinator.current(wallet,
+            "${CredentialValidation.normalizeLabel(passLabelInput.text.toString())}.${IssuerSpace.namespace}")
+    }.getOrNull()
+
+    private fun renderIssuanceSessions(wallet: String) {
+        issuanceSessionsContainer.removeAllViews()
+        val unfinished = issuanceCoordinator.list(wallet).filter { it.state != IssuanceState.READY }
+        val updates = managementCoordinator.pending(wallet)
+        val prepared = credentialTransactionEngine.preparedForWallet(wallet)
+        issuanceSessionsContainer.visibility = if (unfinished.isEmpty() && updates.isEmpty() && prepared.isEmpty()) View.GONE else View.VISIBLE
+        if (unfinished.isNotEmpty() || updates.isNotEmpty() || prepared.isNotEmpty()) {
+            issuanceSessionsContainer.addView(formHeading("Continue where you left off"), cardParams())
+        }
+        unfinished.forEach { session ->
+            val card = productCard()
+            card.addView(productHeading(session.fullName).apply { textSize = 14f }, matchWrapParams())
+            card.addView(productBody(ProductShellPolicy.humanIssuanceStatus(session.state)).apply { textSize = 13f }, cardParams())
+            card.addView(productButton("Open setup", primary = false) {
+                selectedTemplate = session.template
+                showStudioMode(false)
+                updateTemplatePresentation(session.template)
+                accessActiveInput.isChecked = session.accessActive
+                transferableInput.isChecked = session.configurationTransferable
+                descriptionInput.setText(session.description)
+                passLabelInput.setText(session.fullName.removeSuffix(".${IssuerSpace.namespace}"))
+                passRecipientInput.setText(session.holder)
+                registrationExpiryInput.setText(formatDraftTime(session.expiry))
+                accessValidUntilInput.setText(formatDraftTime(session.accessValidUntil))
+                artworkInput.setText(session.avatarUri)
+                updateDerivedPassName()
+                renderIssuance(session)
+                val binding = writeCoordinator.currentWallet() ?: return@productButton
+                runWriteAction(binding, "Recovering selected setup…", "Recover setup", "RECOVERY") {
+                    recoverIssuance(wallet, session.identity)
+                }
+            }, matchWrapParams())
+            issuanceSessionsContainer.addView(card, cardParams())
+        }
+        updates.forEach { session ->
+            issuanceSessionsContainer.addView(productButton("Retry update verification: ${session.fullName}", primary = false) {
+                val binding = writeCoordinator.currentWallet() ?: return@productButton
+                runWriteAction(binding, "Verifying the saved update…", "Verify update", "FINAL_READBACK") {
+                    recoverManagementSession(session)
+                    renderIssuanceSessions(wallet)
+                }
+            }, actionParams())
+        }
+        prepared.forEach { operation ->
+            val name = operation.operationType.substringAfter(':', IssuerSpace.fullName)
+            issuanceSessionsContainer.addView(productButton("Cancel unsent preparation: $name", primary = false) {
+                val binding = writeCoordinator.currentWallet() ?: return@productButton
+                AlertDialog.Builder(this).setTitle("Cancel unsent preparation?")
+                    .setMessage("$name\nWallet: ${operation.walletAddress}\n\nThis preparation has not reached the wallet. Cancel it to allow another pass transaction.")
+                    .setNegativeButton("Keep", null)
+                    .setPositiveButton("Cancel preparation") { _, _ ->
+                        runWriteAction(binding, "Cancelling the selected preparation…", "Cancel preparation") {
+                            require(operation.walletAddress.equals(binding.address, true)) { "WRITE_INTENT_MISMATCH" }
+                            StudioPreparedOperationResolver(credentialTransactionEngine, issuanceCoordinator, managementCoordinator)
+                                .cancel(operation)
+                            renderIssuanceSessions(binding.address)
+                            showStatus("Unsent preparation cancelled. Review your next operation before continuing.")
+                        }
+                    }.show()
+            }, actionParams())
+        }
+        renderSelectedIssuance()
+    }
+
+    private fun writePermit(lease: StudioWriteLease, operation: PersistedTransactionOperation,
+        fullName: String, sessionId: String, businessIntent: Any) = StudioWritePermit(writeCoordinator, lease,
+        StudioWriteIntent(operation.operationId, sessionId, lease.wallet, operation.chainId, fullName,
+            operation.operationType, operation.targetAddress, operation.valueWei, operation.dataSummary, businessIntent))
+
+    private fun reviewCredential() {
+        val binding = writeCoordinator.currentWallet() ?: return
+        runAction("Checking Studio authority and pass availability…") {
+            val draft = readPassDraft()
+            val existing = issuanceCoordinator.current(binding.address, draft.fullName)
+            require(existing == null || existing.state in setOf(IssuanceState.DRAFT, IssuanceState.REGISTER_READY)) {
+                "ISSUANCE_ALREADY_IN_PROGRESS"
+            }
+            managementCoordinator.requireNoPending()
+            checkNotNull(contractRunner).requireReviewAvailable(registerRequest(binding.address, draft), existing?.registerOperationId)
+            val review = CredentialReviewPolicy.prepare(draft, binding.address).copy(walletBinding = binding)
+            preflightRegister(registerRequest(binding.address, draft), draft)
+            check(writeCoordinator.currentWallet() == binding) { "WALLET_CHANGED_REVIEW_AGAIN" }
             showCredentialReview(review, recordsOnly = false)
         }
     }
 
     private fun submitRegister(review: CredentialReviewDraft) {
-        val wallet = ethereumWallet ?: return
+        val binding = review.walletBinding ?: return
         val runner = contractRunner ?: return
-        val request = registerRequest(wallet.address)
-        runAction(
-            "Rechecking credential before wallet approval…",
-            actionName = "Create credential",
-            stage = "TX1_SUBMISSION",
-        ) {
-            require(CredentialReviewPolicy.matchesCurrentArtwork(review, artworkInput.text.toString())) {
-                "CREDENTIAL_CHANGED_REVIEW_AGAIN"
-            }
-            val existing = issuanceCoordinator.current(wallet.address)
+        val draft = review.passDraft ?: return
+        val request = registerRequest(binding.address, draft)
+        runWriteAction(binding, "Rechecking credential before wallet approval…", "Create credential", "TX1_SUBMISSION") { lease ->
+            managementCoordinator.requireNoPending()
+            require(readPassDraft() == draft) { "CREDENTIAL_CHANGED_REVIEW_AGAIN" }
+            val existing = issuanceCoordinator.current(binding.address, draft.fullName)
             require(existing == null || existing.state in setOf(IssuanceState.DRAFT, IssuanceState.REGISTER_READY)) {
                 "ISSUANCE_ALREADY_IN_PROGRESS"
             }
-            runner.verifyNewSubmission(request) {
-                require(CredentialReviewPolicy.matchesCurrentArtwork(review, artworkInput.text.toString())) {
-                    "CREDENTIAL_CHANGED_REVIEW_AGAIN"
-                }
-                preflightRegister(request)
-            }
-            require(CredentialReviewPolicy.matchesCurrentArtwork(review, artworkInput.text.toString())) {
-                "CREDENTIAL_CHANGED_REVIEW_AGAIN"
-            }
-            val fingerprint = CredentialAbi.calldataFingerprint(request.data)
-            val operation = credentialTransactionEngine.latestForWallet(
-                wallet.address, ContractTransactionRunner.REGISTER_OPERATION,
-            )?.takeIf {
-                it.state in setOf(
-                    TransactionOperationState.DRAFT,
-                    TransactionOperationState.READY_TO_REVIEW,
-                    TransactionOperationState.READY_TO_SUBMIT,
-                ) && it.targetAddress.equals(request.to, true) && it.dataSummary == fingerprint
-            } ?: runner.create(request)
-            val session = issuanceCoordinator.beginRegister(wallet.address, review.avatarUri, operation.operationId)
+            val preflight: suspend () -> Unit = { preflightRegister(request, draft) }
+            runner.verifyNewSubmission(request, preflight)
+            val operation = runner.create(request, existing?.registerOperationId)
+            val session = issuanceCoordinator.beginRegister(binding.address, draft, operation.operationId)
+            val identity = session.identity
             runner.review(operation.operationId)
-            renderIssuance(session)
-            val result = runner.submit(
-                operationId = operation.operationId,
-                request = request,
-                preflight = {
-                    require(CredentialReviewPolicy.matchesCurrentArtwork(review, artworkInput.text.toString())) {
-                        "CREDENTIAL_CHANGED_REVIEW_AGAIN"
-                    }
-                    preflightRegister(request)
-                },
-                onChanged = { operation ->
-                    if (operation.state in setOf(
-                            TransactionOperationState.SUBMITTING_NO_HASH,
-                            TransactionOperationState.HASH_RECEIVED,
-                            TransactionOperationState.CONFIRMING,
-                            TransactionOperationState.ONCHAIN_READBACK,
-                        )
-                    ) {
-                        issuanceCoordinator.registerSubmitted()
-                    }
-                    issuanceCoordinator.current(wallet.address)?.let(::renderIssuance)
-                },
-            )
-            if (result.status == MobileIssuerStatus.CONFIRMED) {
-                try {
-                    renderIssuance(issuanceCoordinator.registerConfirmed())
-                    showStatus("Registration confirmed. Review and resume setup to configure records.")
-                } catch (error: Throwable) {
-                    throw StagedActionException("POST_TX1_FINALIZATION", error)
-                }
-            } else {
-                renderIssuance(issuanceCoordinator.current(wallet.address)!!)
-                showStatus("We could not confirm registration. The existing attempt will be recovered before any retry.")
+            runner.submit(operation.operationId, request, preflight,
+                writePermit(lease, operation, session.fullName, session.sessionId, draft)) { changed ->
+                renderIssuance(issuanceCoordinator.reconcile(identity, changed))
             }
+            renderIssuance(issuanceCoordinator.reconcile(identity, checkNotNull(credentialTransactionEngine.find(operation.operationId))))
+            renderIssuanceSessions(binding.address)
         }
     }
 
-    private fun reviewRecords() {
-        val wallet = ethereumWallet ?: return
-        runAction(
-            "Checking registered credential before record setup…",
-            actionName = "Resume setup",
-            stage = "TX2_REVIEW_PREFLIGHT",
-        ) {
-            val session = issuanceCoordinator.current(wallet.address) ?: error("ISSUANCE_SESSION_REQUIRED")
-            val configuration = CredentialConfigurationPolicy.prepare(session)
-            val request = recordsRequest(wallet.address, configuration.calldata)
-            preflightRecords(request, session)
-            showCredentialReview(
-                configuration.review,
-                recordsOnly = true,
-                configurationCalldata = configuration.calldata,
-            )
+    private fun reviewRecords(validUntil: BigInteger? = null) {
+        val binding = writeCoordinator.currentWallet() ?: return
+        val identity = selectedIssuance(binding.address)?.identity ?: return
+        runAction("Reading the registered credential for setup…", "Resume setup", "TX2_REVIEW_PREFLIGHT") {
+            val session = issuanceCoordinator.get(identity)
+            val current = credentialReader.read(session.fullName)
+            val validity = validUntil ?: session.accessValidUntil
+            if (current.snapshotTimestamp != null && validity <= current.snapshotTimestamp) {
+                val input = studioDateInput("Date and time").apply {
+                    setText(formatDraftTime(session.expiry))
+                }
+                AlertDialog.Builder(this@MainActivity).setTitle("Access validity expired — review new validity")
+                    .setView(input).setNegativeButton("Back", null)
+                    .setPositiveButton("Review") { _, _ ->
+                        runCatching { parseDraftTime(input.text.toString()) }.onSuccess {
+                            if (writeCoordinator.currentWallet() == binding && selectedIssuance(binding.address)?.identity == identity) reviewRecords(it)
+                        }.onFailure { showSafeFailure("Review validity", it) }
+                    }.show()
+                return@runAction
+            }
+            val acknowledged = StudioConfigurationPolicy.review(session, current, validity)
+            val configuration = CredentialConfigurationPolicy.prepare(acknowledged)
+            val request = recordsRequest(binding.address, configuration.calldata,
+                ContractTransactionRunner.recordsOperation(session.fullName))
+            managementCoordinator.requireNoPending()
+            checkNotNull(contractRunner).requireReviewAvailable(request, session.recordsOperationId)
+            preflightRecords(request, acknowledged)
+            check(writeCoordinator.currentWallet() == binding) { "WALLET_CHANGED_REVIEW_AGAIN" }
+            val changed = !session.configurationOwner.equals(current.owner, true) ||
+                session.configurationRoles != current.ownerRoleBitmap
+            val review = configuration.review.copy(walletBinding = binding)
+            if (changed) {
+                AlertDialog.Builder(this@MainActivity).setTitle("Credential changed after registration")
+                    .setMessage("Current owner: ${current.owner}\nCurrent roles: ${current.ownerRoleBitmap}\n" +
+                        "Transferable: ${current.transferable}\n\nReview these authoritative values before configuring the explicit records. Transferability will not be changed.")
+                    .setNegativeButton("Back", null).setPositiveButton("Acknowledge & review") { _, _ ->
+                        showCredentialReview(review, true, configuration.calldata)
+                    }.show()
+            } else showCredentialReview(review, true, configuration.calldata)
         }
     }
 
     private fun resumeIssuance() {
-        val wallet = ethereumWallet ?: return
-        if (issuanceCoordinator.current(wallet.address)?.state == IssuanceState.AUTHORITATIVE_READBACK) {
-            runAction(
-                "Retrying confirmed credential verification…",
-                actionName = "Verify credential",
-                stage = "FINAL_READBACK",
-            ) { authoritativeReadback() }
-        } else {
-            reviewRecords()
-        }
+        val binding = writeCoordinator.currentWallet() ?: return
+        val identity = selectedIssuance(binding.address)?.identity ?: return
+        if (issuanceCoordinator.get(identity).state == IssuanceState.AUTHORITATIVE_READBACK) {
+            runWriteAction(binding, "Retrying confirmed credential verification…", "Verify credential", "FINAL_READBACK") {
+                authoritativeReadback(identity)
+            }
+        } else reviewRecords()
     }
 
     private fun submitRecords(review: CredentialReviewDraft, reviewedCalldata: String) {
-        val wallet = ethereumWallet ?: return
+        val binding = review.walletBinding ?: return
+        val acknowledged = review.configurationSession ?: return
+        val identity = acknowledged.identity
         val runner = contractRunner ?: return
-        runAction(
-            "Rechecking access setup before wallet approval…",
-            actionName = "Configure credential",
-            stage = "TX2_SUBMISSION",
-        ) {
-            var session = issuanceCoordinator.current(wallet.address) ?: error("ISSUANCE_SESSION_REQUIRED")
-            val configuration = CredentialConfigurationPolicy.prepare(session)
-            require(review.avatarUri == session.avatarUri) { "CREDENTIAL_CHANGED_REVIEW_AGAIN" }
-            require(reviewedCalldata == configuration.calldata) { "CREDENTIAL_CHANGED_REVIEW_AGAIN" }
-            val request = recordsRequest(wallet.address, configuration.calldata)
-            runner.verifyNewSubmission(request) { preflightRecords(request, session) }
-            val fingerprint = CredentialAbi.calldataFingerprint(request.data)
-            val operation = credentialTransactionEngine.latestForWallet(
-                wallet.address, ContractTransactionRunner.RECORDS_OPERATION,
-            )?.takeIf {
-                it.state in setOf(
-                    TransactionOperationState.DRAFT,
-                    TransactionOperationState.READY_TO_REVIEW,
-                    TransactionOperationState.READY_TO_SUBMIT,
-                ) && it.targetAddress.equals(request.to, true) && it.dataSummary == fingerprint
-            } ?: runner.create(request)
-            if (session.state == IssuanceState.REGISTERED_CONFIGURING) {
-                session = issuanceCoordinator.recordsReady(operation.operationId)
+        runWriteAction(binding, "Rechecking access setup before wallet approval…", "Configure credential", "TX2_SUBMISSION") { lease ->
+            managementCoordinator.requireNoPending()
+            val current = issuanceCoordinator.get(identity)
+            require(current.state in setOf(IssuanceState.REGISTERED_CONFIGURING, IssuanceState.RECORDS_READY)) { "RECORDS_NOT_READY" }
+            require(current.wallet.equals(binding.address, true) &&
+                CredentialConfigurationPolicy.calldata(acknowledged) == reviewedCalldata) { "WRITE_INTENT_MISMATCH" }
+            val request = recordsRequest(binding.address, reviewedCalldata, ContractTransactionRunner.recordsOperation(current.fullName))
+            val preflight: suspend () -> Unit = { preflightRecords(request, acknowledged) }
+            runner.verifyNewSubmission(request, preflight)
+            val operation = runner.create(request, current.recordsOperationId)
+            // Reconcile only the exact preparation this confirmation explicitly replaced.
+            current.recordsOperationId?.let(credentialTransactionEngine::find)?.let {
+                issuanceCoordinator.reconcile(identity, it)
             }
+            issuanceCoordinator.recordsReady(identity, operation.operationId, acknowledged)
             runner.review(operation.operationId)
-            renderIssuance(session)
-            val result = runner.submit(
-                operation.operationId,
-                request,
-                preflight = { preflightRecords(request, session) },
-                onChanged = { operation ->
-                    if (operation.state in setOf(
-                            TransactionOperationState.SUBMITTING_NO_HASH,
-                            TransactionOperationState.HASH_RECEIVED,
-                            TransactionOperationState.CONFIRMING,
-                            TransactionOperationState.ONCHAIN_READBACK,
-                        )
-                    ) {
-                        issuanceCoordinator.recordsSubmitted()
-                    }
-                    issuanceCoordinator.current(wallet.address)?.let(::renderIssuance)
-                },
-            )
-            when {
-                result.status == MobileIssuerStatus.CONFIRMED -> {
-                    issuanceCoordinator.recordsConfirmed()
-                    authoritativeReadback()
-                }
-                credentialTransactionEngine.find(operation.operationId)?.state == TransactionOperationState.REVERTED -> {
-                    renderIssuance(issuanceCoordinator.recordsFailed())
-                    showStatus("Record transaction failed. Registration is preserved; Resume setup retries records only.")
-                }
-                else -> {
-                    renderIssuance(issuanceCoordinator.current(wallet.address)!!)
-                    showStatus("We could not confirm setup. The existing attempt will be recovered before any retry.")
-                }
+            val result = runner.submit(operation.operationId, request, preflight,
+                writePermit(lease, operation, current.fullName, current.sessionId, acknowledged)) { changed ->
+                renderIssuance(issuanceCoordinator.reconcile(identity, changed))
             }
+            renderIssuance(issuanceCoordinator.reconcile(identity, checkNotNull(credentialTransactionEngine.find(operation.operationId))))
+            if (result.status == MobileIssuerStatus.CONFIRMED) authoritativeReadback(identity)
+            renderIssuanceSessions(binding.address)
         }
     }
 
-    private suspend fun preflightRegister(request: ContractTransactionRequest) {
-        val capability = credentialReader.issuerCapability(request.from)
-        require(capability.allowed) { "ISSUER_AUTHORITY_${capability.category}" }
-        val snapshot = credentialReader.read(IssuerSpace.fullName)
+    private suspend fun preflightRegister(request: ContractTransactionRequest, draft: PassDraft) {
+        val capability = credentialReader.studioCapabilities(request.from)
+        require(capability.canIssue == IssuerCapabilityState.ALLOWED) { "ISSUE_AUTHORITY_${capability.category}" }
+        require(request.operationType == ContractTransactionRunner.registerOperation(draft.fullName)) {
+            "TRANSACTION_OPERATION_TYPE_MISMATCH"
+        }
+        require(request.data == CredentialAbi.register(
+            draft.normalizedLabel, draft.recipient, IssuerSpace.resolver, draft.registrationExpiry, draft.roleBitmap,
+        )) { "TRANSACTION_DATA_MISMATCH" }
+        val snapshot = credentialReader.read(draft.fullName)
         CredentialProductPolicy.requireAvailable(snapshot)
-        CredentialValidation.validateExpiry(
-            BigInteger.valueOf(IssuerSpace.STAFF_EXPIRY),
+        val historicalNames = R1CredentialCandidateSource(credentialRpcClient).candidates().first
+            .map { CredentialValidation.normalizeFullName(it.fullName) }
+        require(draft.fullName !in historicalNames) { "CREDENTIAL_LABEL_PREVIOUSLY_USED" }
+        draft.validated(
             snapshot.snapshotTimestamp ?: error("BLOCK_TIME_MISSING"),
+            capability.namespaceExpiry ?: error("NAMESPACE_EXPIRY_MISSING"),
         )
-        require(BigInteger.valueOf(IssuerSpace.STAFF_EXPIRY) < (capability.namespaceExpiry
-            ?: error("NAMESPACE_EXPIRY_MISSING"))) { "EXPIRY_OUTSIDE_NAMESPACE" }
+        require(snapshot.provenanceMatches) { "WRONG_PROVENANCE" }
         credentialReader.simulate(request.from, request.to, request.data)
     }
 
     private suspend fun preflightRecords(request: ContractTransactionRequest, session: IssuanceSession) {
-        require(request.from.equals(IssuerSpace.issuer, true)) { "WRONG_ISSUER" }
         require(request.to.equals(IssuerSpace.resolver, true)) { "WRONG_RESOLVER" }
         require(request.data == CredentialConfigurationPolicy.calldata(session)) { "TRANSACTION_DATA_MISMATCH" }
         require(credentialRpcClient.chainId() == BigInteger.valueOf(IssuerSpace.chainId)) { "WRONG_CHAIN" }
         val latest = credentialRpcClient.transactionCount(request.from, "latest")
         val pending = credentialRpcClient.transactionCount(request.from, "pending")
-        require(latest == BigInteger.TWO && pending == BigInteger.TWO) { "UNEXPECTED_ISSUER_NONCE" }
-        val capability = credentialReader.issuerCapability(request.from)
-        require(capability.allowed) { "ISSUER_AUTHORITY_${capability.category}" }
+        require(latest == pending) { "PENDING_TRANSACTION" }
+        val capability = credentialReader.studioCapabilities(request.from)
+        require(capability.canManageAccess == IssuerCapabilityState.ALLOWED) { "ACCESS_AUTHORITY_${capability.category}" }
+        require(capability.canManagePresentation == IssuerCapabilityState.ALLOWED) {
+            "PRESENTATION_AUTHORITY_${capability.category}"
+        }
         val registerOperation = session.registerOperationId?.let(credentialTransactionEngine::find)
         require(registerOperation?.state == TransactionOperationState.CONFIRMED) { "REGISTER_RECEIPT_NOT_CONFIRMED" }
-        require(registerOperation.postLatestNonce == "2" && registerOperation.postPendingNonce == "2") {
-            "REGISTER_NONCE_EVIDENCE_MISMATCH"
-        }
+        require(session.expiry < checkNotNull(capability.namespaceExpiry)) { "EXPIRY_OUTSIDE_NAMESPACE" }
+        require(request.from.equals(session.wallet, true)) { "WRITE_INTENT_MISMATCH" }
+        val registerEvidence = checkNotNull(contractRunner).recover(registerOperation.operationId,
+            registerRequest(session.wallet, session.toPassDraft(), registerOperation.operationType))
+        require(registerEvidence.status == MobileIssuerStatus.CONFIRMED) { "REGISTER_RECEIPT_NOT_CONFIRMED" }
         val snapshot = credentialReader.read(session.fullName)
-        require(snapshot.readStatus == CredentialReadStatus.FRESH) { "CREDENTIAL_STATE_UNKNOWN" }
-        require(snapshot.status == CredentialRegistryStatus.REGISTERED) { "CREDENTIAL_NOT_REGISTERED" }
-        require(snapshot.owner.equals(session.holder, true)) { "WRONG_OWNER" }
-        require(snapshot.resolver.equals(IssuerSpace.resolver, true)) { "WRONG_RESOLVER" }
-        require(snapshot.subregistry.equals(IssuerSpace.ZERO_ADDRESS, true)) { "WRONG_SUBREGISTRY" }
-        require(snapshot.registryExpiry == session.expiry) { "WRONG_REGISTRY_EXPIRY" }
-        require(snapshot.ownerRoleBitmap == BigInteger.ZERO && snapshot.transferable == false) {
-            "CREDENTIAL_TRANSFERABLE"
-        }
+        StudioConfigurationPolicy.requireAcknowledged(session, snapshot)
+        val receiptBlock = registerOperation.receiptBlock?.let(::BigInteger) ?: error("RECEIPT_BLOCK_MISSING")
+        require(snapshot.snapshotBlock != null && snapshot.snapshotBlock >= receiptBlock) { "READBACK_BEHIND_CONFIRMED_RECEIPT" }
         require(snapshot.description.orEmpty().isEmpty()) { "DESCRIPTION_ALREADY_SET" }
         require(snapshot.avatarUri.orEmpty().isEmpty()) { "AVATAR_ALREADY_SET" }
         require(snapshot.accessActive == null && snapshot.accessValidUntil == null) { "ACCESS_ALREADY_SET" }
@@ -1818,100 +2446,99 @@ class MainActivity : Activity() {
         credentialReader.simulate(request.from, request.to, request.data)
     }
 
-    private fun registerRequest(wallet: String) = ContractTransactionRequest(
-        ContractTransactionRunner.REGISTER_OPERATION,
+    private fun registerRequest(
+        wallet: String,
+        draft: PassDraft,
+        operationType: String = ContractTransactionRunner.registerOperation(draft.fullName),
+    ) = ContractTransactionRequest(
+        operationType,
         wallet,
         IssuerSpace.registry,
         CredentialAbi.register(
-            IssuerSpace.STAFF_LABEL,
-            IssuerSpace.STAFF_HOLDER,
+            draft.normalizedLabel,
+            draft.recipient,
             IssuerSpace.resolver,
-            BigInteger.valueOf(IssuerSpace.STAFF_EXPIRY),
+            draft.registrationExpiry,
+            draft.roleBitmap,
         ),
     )
 
-    private fun recordsRequest(wallet: String, calldata: String) = ContractTransactionRequest(
-        ContractTransactionRunner.RECORDS_OPERATION,
+    private fun recordsRequest(
+        wallet: String,
+        calldata: String,
+        operationType: String,
+    ) = ContractTransactionRequest(
+        operationType,
         wallet,
         IssuerSpace.resolver,
         calldata,
     )
 
-    private suspend fun authoritativeReadback() {
-        val wallet = ethereumWallet ?: return
-        val session = issuanceCoordinator.current(wallet.address) ?: return
-        renderIssuance(issuanceCoordinator.beginReadback())
+    private suspend fun authoritativeReadback(identity: IssuanceIdentity) {
+        val session = issuanceCoordinator.get(identity)
+        renderIssuance(issuanceCoordinator.beginReadback(identity))
         val recordsOperation = session.recordsOperationId?.let(credentialTransactionEngine::find)
         val minimumBlock = CredentialFinalReadbackPolicy.confirmedReceiptBlock(session, recordsOperation)
+        val confirmed = checkNotNull(contractRunner).recover(checkNotNull(recordsOperation).operationId,
+            recordsRequest(session.wallet, CredentialConfigurationPolicy.calldata(session), recordsOperation.operationType))
+        require(confirmed.status == MobileIssuerStatus.CONFIRMED) { "READBACK_UNAVAILABLE" }
         credentialFinalReadback.reconcile(
-            expected = CredentialExpectation(
-                session.fullName,
-                session.holder,
-                IssuerSpace.resolver,
-                session.expiry,
-                session.description,
-                session.avatarUri,
-            ),
-            minimumBlock = minimumBlock,
-        )
-        val ready = issuanceCoordinator.ready()
+            expected = CredentialExpectation(session.fullName, session.configurationOwner, IssuerSpace.resolver,
+                session.expiry, session.description, session.avatarUri, session.accessActive,
+                session.accessValidUntil, session.configurationRoles), minimumBlock = minimumBlock)
+        val ready = issuanceCoordinator.ready(identity)
         renderIssuance(ready)
         showStatus(ProductShellPolicy.credentialVerificationMessage(ready.state))
     }
 
-    private suspend fun recoverIssuance(wallet: String) {
-        val session = issuanceCoordinator.current(wallet) ?: return
-        val register = session.registerOperationId?.let(credentialTransactionEngine::find)
-        val records = session.recordsOperationId?.let(credentialTransactionEngine::find)
-        when (issuanceCoordinator.recoveryAction(session, register, records)) {
-            IssuanceRecoveryAction.RECOVER_REGISTER -> {
-                renderIssuance(session)
-                val result = checkNotNull(contractRunner).recover(
-                    register!!.operationId, registerRequest(wallet),
-                ) {
-                    issuanceCoordinator.current(wallet)?.let(::renderIssuance)
+    private suspend fun recoverIssuance(wallet: String, selected: IssuanceIdentity? = null) {
+        val runner = contractRunner ?: return
+        val sessions = if (selected == null) issuanceCoordinator.list(wallet) else listOf(issuanceCoordinator.get(selected))
+        for (initial in sessions) {
+            try {
+                val identity = initial.identity
+                var session = initial
+                val register = session.registerOperationId?.let(credentialTransactionEngine::find)
+                val records = session.recordsOperationId?.let(credentialTransactionEngine::find)
+                if (register != null) session = issuanceCoordinator.reconcile(identity, register)
+                if (records != null) session = issuanceCoordinator.reconcile(identity, records)
+                when (issuanceCoordinator.recoveryAction(session, register, records)) {
+                    IssuanceRecoveryAction.RECOVER_REGISTER -> {
+                        val op = checkNotNull(register)
+                        runner.recover(op.operationId, registerRequest(wallet, session.toPassDraft(), op.operationType)) {
+                            issuanceCoordinator.reconcile(identity, it)
+                        }
+                        issuanceCoordinator.reconcile(identity, checkNotNull(credentialTransactionEngine.find(op.operationId)))
+                    }
+                    IssuanceRecoveryAction.RECOVER_RECORDS -> {
+                        val op = checkNotNull(records)
+                        runner.recover(op.operationId, recordsRequest(wallet, CredentialConfigurationPolicy.calldata(session), op.operationType)) {
+                            issuanceCoordinator.reconcile(identity, it)
+                        }
+                        issuanceCoordinator.reconcile(identity, checkNotNull(credentialTransactionEngine.find(op.operationId)))
+                    }
+                    else -> Unit
                 }
-                if (result.status == MobileIssuerStatus.CONFIRMED) {
-                    renderIssuance(issuanceCoordinator.registerConfirmed())
-                }
-            }
-            IssuanceRecoveryAction.RECOVER_RECORDS -> {
-                renderIssuance(session)
-                val result = checkNotNull(contractRunner).recover(
-                    records!!.operationId,
-                    recordsRequest(wallet, CredentialConfigurationPolicy.calldata(session)),
-                ) {
-                    issuanceCoordinator.current(wallet)?.let(::renderIssuance)
-                }
-                if (result.status == MobileIssuerStatus.CONFIRMED) {
-                    issuanceCoordinator.recordsConfirmed()
-                    authoritativeReadback()
-                }
-            }
-            IssuanceRecoveryAction.READBACK -> {
-                if (session.state == IssuanceState.RECORDS_SUBMITTED &&
-                    records?.state == TransactionOperationState.CONFIRMED
-                ) issuanceCoordinator.recordsConfirmed()
-                authoritativeReadback()
-            }
-            IssuanceRecoveryAction.RESUME_RECORDS -> {
-                val resumed = if (session.state in setOf(IssuanceState.REGISTER_SUBMITTED, IssuanceState.REGISTER_CONFIRMED) &&
-                    register?.state == TransactionOperationState.CONFIRMED
-                ) issuanceCoordinator.registerConfirmed() else session
-                renderIssuance(resumed)
-            }
-            else -> renderIssuance(session)
+                if (issuanceCoordinator.get(identity).state == IssuanceState.AUTHORITATIVE_READBACK) authoritativeReadback(identity)
+                renderIssuance(issuanceCoordinator.get(identity))
+            } catch (error: CancellationException) { throw error
+            } catch (error: Throwable) { showSafeFailure("Recover ${initial.fullName}", error, "RECOVERY") }
         }
     }
 
     private fun renderIssuance(session: IssuanceSession) {
+        if (!ethereumWallet?.address.equals(session.wallet, true)) return
+        val editedName = runCatching {
+            "${CredentialValidation.normalizeLabel(passLabelInput.text.toString())}.${IssuerSpace.namespace}"
+        }.getOrNull()
+        if (editedName != session.fullName) return
         createReviewButton.visibility = if (ProductShellPolicy.createCredentialVisible(session.state)) {
             View.VISIBLE
         } else {
             View.GONE
         }
         val retryVerification = ProductShellPolicy.retryVerificationVisible(session.state)
-        resumeSetupButton.text = if (retryVerification) "Retry verification" else "Resume setup"
+        resumeSetupButton.text = if (retryVerification) "Retry verification" else "Review setup"
         resumeSetupButton.visibility = if (ProductShellPolicy.resumeSetupVisible(session.state) || retryVerification) {
             View.VISIBLE
         } else {
@@ -1921,9 +2548,43 @@ class MainActivity : Activity() {
         val register = session.registerOperationId?.let(credentialTransactionEngine::find)
         val records = session.recordsOperationId?.let(credentialTransactionEngine::find)
         val progress = ProductShellPolicy.issuanceProgress(session, register, records)
+        val saved = !ProductShellPolicy.createCredentialVisible(session.state)
+        studioFormFields.visibility = if (saved) View.GONE else View.VISIBLE
+        studioSavedSummary.visibility = if (saved) View.VISIBLE else View.GONE
+        studioSavedSummary.removeAllViews()
+        if (saved) studioSavedSummary.addView(productCard().apply {
+            addView(formHeading("Saved setup", session.fullName), cardParams())
+            addView(reviewRow("Recipient", session.configurationOwner), matchWrapParams())
+            addView(reviewRow("Access ends", StudioTime.describe(session.accessValidUntil)), matchWrapParams())
+            addView(exactReviewField("Description", session.description), matchWrapParams())
+            if (session.state != IssuanceState.READY) addView(productBody("The next review checks the current onchain owner and access conditions.").apply { textSize = 12f }, matchWrapParams())
+            addView(productButton("Start a new pass", primary = false) {
+                applyPassTemplate(selectedTemplate)
+                passLabelInput.setText("")
+                updateDerivedPassName()
+            }, actionParams())
+        }, cardParams())
         productStatusText.visibility = if (progress == null) View.GONE else View.VISIBLE
-        productStatusText.text = progress?.visibleText().orEmpty()
+        productStatusText.text = when (session.state) {
+            IssuanceState.REGISTERED_CONFIGURING -> "Registration confirmed\nStep 2 of 3 · Review setup to configure access."
+            IssuanceState.RECORDS_READY -> "Setup needs review\nStep 2 of 3 · Check the details before wallet confirmation."
+            IssuanceState.AUTHORITATIVE_READBACK -> "Verification pending\nBoth transactions are confirmed. Retry verification to finish."
+            IssuanceState.READY -> "Pass ready\nCreation, access setup and onchain verification complete."
+            else -> progress?.visibleText().orEmpty()
+        }
     }
+
+    private fun IssuanceSession.toPassDraft() = PassDraft(
+        template = template,
+        label = fullName.removeSuffix(".${IssuerSpace.namespace}"),
+        recipient = holder,
+        registrationExpiry = expiry,
+        accessActive = accessActive,
+        accessValidUntil = accessValidUntil,
+        transferable = transferable,
+        description = description,
+        artworkUri = avatarUri,
+    )
 
     private fun importCredential() {
         val wallet = ethereumWallet ?: return showStatus("Log in before importing a credential.")
@@ -2009,7 +2670,11 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun copyCredentialName() = copyPublicProof("Credential name", IssuerSpace.fullName)
+    private fun copyCredentialName() {
+        val wallet = ethereumWallet ?: return
+        val fullName = selectedIssuance(wallet.address)?.fullName ?: return
+        copyPublicProof("Credential name", fullName)
+    }
 
     private fun onIssuerConfirmationChanged(checked: Boolean) {
         Log.i(M1_LOG_TAG, "M1_CONFIRMATION_CHANGED checked=$checked")
@@ -2135,6 +2800,7 @@ class MainActivity : Activity() {
     }
 
     private fun confirmMobileIssuerAdmission() {
+        val binding = writeCoordinator.currentWallet() ?: return
         val wallet = ethereumWallet ?: return blockMobileIssuer("WALLET_REQUIRED")
         val operationId = m1OperationId ?: return blockMobileIssuer("OPERATION_REQUIRED")
         val operation = m1TransactionEngine.find(operationId)
@@ -2153,21 +2819,21 @@ class MainActivity : Activity() {
                 if (!MobileIssuerUiPolicy.reviewEnabled(current.state)) {
                     return@setPositiveButton blockMobileIssuer("OPERATION_NOT_READY_TO_SUBMIT")
                 }
-                runMobileIssuerAdmission(wallet.address, operationId)
+                runMobileIssuerAdmission(wallet.address, operationId, binding)
             }
             .show()
     }
 
-    private fun runMobileIssuerAdmission(issuer: String, operationId: String) {
+    private fun runMobileIssuerAdmission(issuer: String, operationId: String, binding: StudioWalletBinding) {
         val runner = m1Runner ?: return blockMobileIssuer("RUNNER_NOT_AVAILABLE")
-        setBusy(true)
-        activityScope.launch {
-            val result = runner.submitReviewedOperation(
+        runWriteAction(binding, "Submitting developer admission…", "M1 admission") { lease ->
+            writeCoordinator.requireCurrent(lease)
+            val result = withContext(kotlinx.coroutines.NonCancellable) { runner.submitReviewedOperation(
                 issuer = issuer,
                 dedicatedIssuerConfirmed = issuerConfirmation.isChecked,
                 onStatus = { m1StatusText.text = "STATUS:\nSubmitting" },
                 observer = m1Observer(operationId),
-            )
+            ) }
             val evidence = result.evidence
             m1StatusText.text = if (evidence == null) {
                 "STATUS:\n${result.status} - ${result.category}"
@@ -2185,7 +2851,7 @@ class MainActivity : Activity() {
             val persisted = m1TransactionEngine.find(operationId)
             if (persisted?.state == TransactionOperationState.UNKNOWN && persisted.txHash == null) {
                 reconcileM1Operation(persisted)
-                return@launch
+                return@runWriteAction
             }
             persisted?.let(::renderM1Operation)
             result.failure?.let { m1StatusText.text = MobileIssuerUiPolicy.preSubmitFailureText(it) }
@@ -2458,27 +3124,55 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun runAction(
-        progress: String,
-        actionName: String = "Operation",
-        stage: String = "ACTION",
-        action: suspend () -> Unit,
-    ) {
-        setBusy(true)
+    private fun setStudioControls(view: View, enabled: Boolean) {
+        if (view is Button || view is EditText || view is android.widget.CompoundButton) view.isEnabled = enabled
+        if (view is ViewGroup) for (i in 0 until view.childCount) setStudioControls(view.getChildAt(i), enabled)
+    }
+
+    private fun runWriteAction(binding: StudioWalletBinding, progress: String, actionName: String,
+        stage: String = "ACTION", action: suspend (StudioWriteLease) -> Unit) {
+        val lease = try {
+            val local = ethereumWallet
+            check(local != null && local.address.equals(binding.address, true) &&
+                walletProviderId(local) == binding.providerId && contractRunner?.identity == StudioRunnerIdentity(binding, IssuerSpace.chainId)) {
+                "WALLET_CHANGED_REVIEW_AGAIN"
+            }
+            writeCoordinator.acquire(binding)
+        } catch (error: Throwable) {
+            showSafeFailure(actionName, error, stage); return
+        }
         showStatus(progress)
-        activityScope.launch {
-            try {
-                action()
+        activityScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            try { action(lease)
+            } catch (error: CancellationException) { throw error
             } catch (error: Throwable) {
                 val staged = error as? StagedActionException
                 showSafeFailure(actionName, staged?.original ?: error, staged?.safeStage ?: stage)
-            } finally {
-                setBusy(false)
-            }
+                // Also expose an unsent journal entry if product linkage/persistence failed.
+                runCatching { renderIssuanceSessions(binding.address) }
+            } finally { writeCoordinator.release(lease) }
         }
     }
 
-    private fun setBusy(isBusy: Boolean) {
+    private fun runAction(progress: String, actionName: String = "Operation", stage: String = "ACTION",
+        action: suspend () -> Unit) {
+        if (writeCoordinator.isBusy()) return showStatus("Wait for the active operation to finish.")
+        readActionCount++
+        setBusy(true)
+        showStatus(progress)
+        activityScope.launch {
+            try { action()
+            } catch (error: CancellationException) { throw error
+            } catch (error: Throwable) {
+                val staged = error as? StagedActionException
+                showSafeFailure(actionName, staged?.original ?: error, staged?.safeStage ?: stage)
+            } finally { readActionCount--; setBusy(false) }
+        }
+    }
+
+    private fun setBusy(requested: Boolean) {
+        val isBusy = requested || readActionCount > 0 || writeCoordinator.isBusy()
+        if (::issuerProductSection.isInitialized) setStudioControls(issuerProductSection, !isBusy)
         operationButtons.forEach { it.isEnabled = !isBusy }
         if (::createReviewButton.isInitialized) createReviewButton.isEnabled = !isBusy
         if (::resumeSetupButton.isInitialized) resumeSetupButton.isEnabled = !isBusy
@@ -2521,6 +3215,11 @@ class MainActivity : Activity() {
         lastActionFailure = failure
         actionFailureText.text = failure.diagnosticText()
         showStatus(failure.humanMessage)
+        if (error is StudioOperationConflict || error is StudioManagementConflict) {
+            AlertDialog.Builder(this).setTitle("Unfinished transaction")
+                .setMessage(failure.humanMessage)
+                .setPositiveButton("OK", null).show()
+        }
     }
 
     private fun safeErrorClass(error: Throwable): String =
@@ -2564,6 +3263,7 @@ class MainActivity : Activity() {
         const val CREDENTIAL_PREFERENCES = "credential_product"
         const val CREDENTIAL_TRANSACTION_JOURNAL = "transaction_journal_v1"
         const val CREDENTIAL_ISSUANCE_JOURNAL = "staff_issuance_v1"
+        const val CREDENTIAL_MANAGEMENT_JOURNAL = "management_operation_v1"
         const val CREDENTIAL_LOCAL_INDEX = "local_index_v1"
         const val ACTIVE_WALLET = "active_wallet_v1"
         const val SELECTED_PASS = "selected_pass_v1"

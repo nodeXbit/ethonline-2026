@@ -67,9 +67,33 @@ object CredentialValidation {
         return value
     }
 
+    fun requireNonZeroAddress(value: String): String {
+        val address = requireAddress(value.trim())
+        require(!address.equals(IssuerSpace.ZERO_ADDRESS, true)) { "ZERO_RECIPIENT" }
+        val letters = address.drop(2)
+        val checksummed = checksumAddress(address)
+        require(letters == letters.lowercase() || letters == letters.uppercase() || address == checksummed) {
+            "INVALID_RECIPIENT_CHECKSUM"
+        }
+        return checksummed
+    }
+
+    fun checksumAddress(value: String): String {
+        val clean = requireAddress(value).drop(2).lowercase()
+        val digest = Keccak.Digest256().digest(clean.toByteArray(StandardCharsets.US_ASCII))
+            .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        return "0x" + clean.mapIndexed { index, char ->
+            if (char in 'a'..'f' && digest[index].digitToInt(16) >= 8) char.uppercaseChar() else char
+        }.joinToString("")
+    }
+
     fun validateExpiry(expiry: BigInteger, now: BigInteger) {
+        validateExpiry(expiry, now, BigInteger.valueOf(IssuerSpace.namespaceExpiry))
+    }
+
+    fun validateExpiry(expiry: BigInteger, now: BigInteger, namespaceExpiry: BigInteger) {
         require(expiry > now) { "CREDENTIAL_EXPIRED" }
-        require(expiry < BigInteger.valueOf(IssuerSpace.namespaceExpiry)) { "EXPIRY_OUTSIDE_NAMESPACE" }
+        require(expiry <= namespaceExpiry - BigInteger.valueOf(60)) { "EXPIRY_OUTSIDE_NAMESPACE" }
         require(expiry.bitLength() <= 64) { "EXPIRY_OUTSIDE_UINT64" }
     }
 
@@ -103,6 +127,7 @@ object CredentialAbi {
         holder: String,
         resolver: String,
         expiry: BigInteger,
+        roleBitmap: BigInteger = BigInteger.ZERO,
     ): String = FunctionEncoder.encode(
         Function(
             "register",
@@ -111,7 +136,7 @@ object CredentialAbi {
                 Address(CredentialValidation.requireAddress(holder)),
                 Address(IssuerSpace.ZERO_ADDRESS),
                 Address(resolver),
-                Uint256(BigInteger.ZERO),
+                Uint256(roleBitmap),
                 Uint64(expiry),
             ),
             outputUint(),
@@ -132,14 +157,25 @@ object CredentialAbi {
         },
     )
 
-    fun credentialRecords(fullName: String, avatarUri: String, description: String, expiry: BigInteger): List<String> {
+    fun credentialRecords(
+        fullName: String,
+        avatarUri: String,
+        description: String,
+        expiry: BigInteger,
+        accessActive: Boolean = true,
+        accessValidUntil: BigInteger = expiry,
+    ): List<String> {
         val node = namehash(fullName)
         return buildList {
             if (avatarUri.isNotBlank()) add(setText(node, "avatar", avatarUri))
             add(setText(node, "description", description))
-            add(setData(node, IssuerSpace.ACCESS_KEY, accessValue(true, expiry)))
+            add(setData(node, IssuerSpace.ACCESS_KEY, accessValue(accessActive, accessValidUntil)))
         }
     }
+
+    fun renew(tokenId: BigInteger, newExpiry: BigInteger): String = FunctionEncoder.encode(
+        Function("renew", listOf(Uint256(tokenId), Uint64(newExpiry)), emptyList()),
+    )
 
     fun multicall(calls: List<String>): String = FunctionEncoder.encode(
         Function(

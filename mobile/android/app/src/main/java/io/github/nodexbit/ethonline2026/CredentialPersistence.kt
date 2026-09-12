@@ -1,6 +1,7 @@
 package io.github.nodexbit.ethonline2026
 
 import java.math.BigInteger
+import java.util.UUID
 
 fun interface StringStateStore {
     fun save(value: String)
@@ -74,15 +75,46 @@ data class IssuanceSession(
     val state: IssuanceState,
     val registerOperationId: String? = null,
     val recordsOperationId: String? = null,
-)
+    val template: PassTemplate = PassTemplate.STAFF,
+    val accessActive: Boolean = true,
+    val accessValidUntil: BigInteger = expiry,
+    val transferable: Boolean = false,
+    val roleBitmap: BigInteger = if (transferable) StudioRoles.CAN_TRANSFER_ADMIN else BigInteger.ZERO,
+    val sessionId: String = UUID.randomUUID().toString(),
+    val acknowledgedOwner: String? = null,
+    val acknowledgedRoles: BigInteger? = null,
+    val acknowledgedTransferable: Boolean? = null,
+) {
+    val identity: IssuanceIdentity get() = IssuanceIdentity(wallet.lowercase(), fullName, sessionId, IssuerSpace.chainId)
+    val configurationOwner: String get() = acknowledgedOwner ?: holder
+    val configurationRoles: BigInteger get() = acknowledgedRoles ?: roleBitmap
+    val configurationTransferable: Boolean get() = acknowledgedTransferable ?: transferable
+}
+
+data class IssuanceIdentity(val wallet: String, val fullName: String, val sessionId: String, val chainId: Long)
 
 enum class IssuanceRecoveryAction { NONE, RECOVER_REGISTER, RESUME_RECORDS, RECOVER_RECORDS, READBACK, DISPLAY_READY }
 
 class IssuanceCoordinator(private val store: LoadableStringStateStore) {
-    private var session: IssuanceSession? = decode(store.load())
+    private val sessions = decodeAll(store.load()).associateByTo(linkedMapOf()) { key(it.wallet, it.fullName) }
 
     @Synchronized
-    fun current(wallet: String): IssuanceSession? = session?.takeIf { it.wallet.equals(wallet, true) }
+    fun current(wallet: String): IssuanceSession? = list(wallet).singleOrNull()
+
+    @Synchronized
+    fun current(wallet: String, fullName: String): IssuanceSession? =
+        sessions[key(wallet, CredentialValidation.normalizeFullName(fullName))]
+
+    @Synchronized
+    fun list(wallet: String): List<IssuanceSession> = sessions.values.filter { it.wallet.equals(wallet, true) }
+
+    @Synchronized
+    fun get(identity: IssuanceIdentity): IssuanceSession {
+        require(identity.chainId == IssuerSpace.chainId) { "WRONG_CHAIN" }
+        val value = sessions[key(identity.wallet, identity.fullName)] ?: error("ISSUANCE_SESSION_REQUIRED")
+        require(value.sessionId == identity.sessionId) { "ISSUANCE_IDENTITY_MISMATCH" }
+        return value
+    }
 
     @Synchronized
     fun start(wallet: String, avatarUri: String): IssuanceSession = save(newSession(wallet, avatarUri))
@@ -92,6 +124,25 @@ class IssuanceCoordinator(private val store: LoadableStringStateStore) {
         newSession(wallet, avatarUri).copy(
             state = IssuanceState.REGISTER_READY,
             registerOperationId = operationId,
+        ),
+    )
+
+    @Synchronized
+    fun beginRegister(wallet: String, draft: PassDraft, operationId: String): IssuanceSession = save(
+        IssuanceSession(
+            wallet = CredentialValidation.requireAddress(wallet),
+            fullName = draft.fullName,
+            holder = CredentialValidation.requireNonZeroAddress(draft.recipient),
+            expiry = draft.registrationExpiry,
+            avatarUri = CredentialValidation.normalizeAvatar(draft.artworkUri),
+            description = draft.description,
+            state = IssuanceState.REGISTER_READY,
+            registerOperationId = operationId,
+            template = draft.template,
+            accessActive = draft.accessActive,
+            accessValidUntil = draft.accessValidUntil,
+            transferable = draft.transferable,
+            roleBitmap = draft.roleBitmap,
         ),
     )
 
@@ -107,18 +158,23 @@ class IssuanceCoordinator(private val store: LoadableStringStateStore) {
         )
 
     @Synchronized
-    fun registerReady(operationId: String): IssuanceSession = update(setOf(IssuanceState.DRAFT)) {
+    fun registerReady(identity: IssuanceIdentity, operationId: String): IssuanceSession = update(identity, setOf(IssuanceState.DRAFT)) {
         it.copy(state = IssuanceState.REGISTER_READY, registerOperationId = operationId)
     }
 
     @Synchronized
-    fun registerSubmitted(): IssuanceSession = update(setOf(IssuanceState.REGISTER_READY, IssuanceState.REGISTER_SUBMITTED)) {
+    fun registerSubmitted(identity: IssuanceIdentity): IssuanceSession = update(identity, setOf(IssuanceState.REGISTER_READY, IssuanceState.REGISTER_SUBMITTED)) {
         it.copy(state = IssuanceState.REGISTER_SUBMITTED)
     }
 
     @Synchronized
-    fun registerConfirmed(): IssuanceSession {
-        val current = checkNotNull(session) { "ISSUANCE_SESSION_REQUIRED" }
+    fun registerNotBroadcast(identity: IssuanceIdentity): IssuanceSession = update(identity, setOf(IssuanceState.REGISTER_SUBMITTED)) {
+        it.copy(state = IssuanceState.DRAFT, registerOperationId = null)
+    }
+
+    @Synchronized
+    fun registerConfirmed(identity: IssuanceIdentity): IssuanceSession {
+        val current = get(identity)
         return when (current.state) {
             IssuanceState.REGISTER_SUBMITTED,
             IssuanceState.REGISTER_CONFIRMED,
@@ -129,28 +185,35 @@ class IssuanceCoordinator(private val store: LoadableStringStateStore) {
     }
 
     @Synchronized
-    fun recordsReady(operationId: String): IssuanceSession = update(setOf(IssuanceState.REGISTERED_CONFIGURING)) {
-        it.copy(state = IssuanceState.RECORDS_READY, recordsOperationId = operationId)
-    }
+    fun recordsReady(identity: IssuanceIdentity, operationId: String, reviewed: IssuanceSession? = null): IssuanceSession =
+        update(identity, setOf(IssuanceState.REGISTERED_CONFIGURING)) { current ->
+            require(reviewed == null || reviewed.identity == identity) { "WRITE_INTENT_MISMATCH" }
+            // Acknowledgment, revised validity and operation linkage are one persistence write.
+            current.copy(state = IssuanceState.RECORDS_READY, recordsOperationId = operationId,
+                acknowledgedOwner = reviewed?.configurationOwner ?: current.acknowledgedOwner,
+                acknowledgedRoles = reviewed?.configurationRoles ?: current.acknowledgedRoles,
+                acknowledgedTransferable = reviewed?.configurationTransferable ?: current.acknowledgedTransferable,
+                accessValidUntil = reviewed?.accessValidUntil ?: current.accessValidUntil)
+        }
 
     @Synchronized
-    fun recordsSubmitted(): IssuanceSession = update(setOf(IssuanceState.RECORDS_READY, IssuanceState.RECORDS_SUBMITTED)) {
+    fun recordsSubmitted(identity: IssuanceIdentity): IssuanceSession = update(identity, setOf(IssuanceState.RECORDS_READY, IssuanceState.RECORDS_SUBMITTED)) {
         it.copy(state = IssuanceState.RECORDS_SUBMITTED)
     }
 
     @Synchronized
-    fun recordsFailed(): IssuanceSession = update(setOf(IssuanceState.RECORDS_READY, IssuanceState.RECORDS_SUBMITTED)) {
+    fun recordsFailed(identity: IssuanceIdentity): IssuanceSession = update(identity, setOf(IssuanceState.RECORDS_READY, IssuanceState.RECORDS_SUBMITTED)) {
         it.copy(state = IssuanceState.REGISTERED_CONFIGURING)
     }
 
     @Synchronized
-    fun recordsConfirmed(): IssuanceSession = update(setOf(IssuanceState.RECORDS_SUBMITTED)) {
+    fun recordsConfirmed(identity: IssuanceIdentity): IssuanceSession = update(identity, setOf(IssuanceState.RECORDS_SUBMITTED)) {
         it.copy(state = IssuanceState.RECORDS_CONFIRMED)
     }
 
     @Synchronized
-    fun beginReadback(): IssuanceSession {
-        val current = checkNotNull(session) { "ISSUANCE_SESSION_REQUIRED" }
+    fun beginReadback(identity: IssuanceIdentity): IssuanceSession {
+        val current = get(identity)
         return when (current.state) {
             IssuanceState.RECORDS_CONFIRMED -> save(current.copy(state = IssuanceState.AUTHORITATIVE_READBACK))
             IssuanceState.AUTHORITATIVE_READBACK,
@@ -161,8 +224,8 @@ class IssuanceCoordinator(private val store: LoadableStringStateStore) {
     }
 
     @Synchronized
-    fun ready(): IssuanceSession {
-        val current = checkNotNull(session) { "ISSUANCE_SESSION_REQUIRED" }
+    fun ready(identity: IssuanceIdentity): IssuanceSession {
+        val current = get(identity)
         return when (current.state) {
             IssuanceState.AUTHORITATIVE_READBACK -> save(current.copy(state = IssuanceState.READY))
             IssuanceState.READY -> current
@@ -170,51 +233,98 @@ class IssuanceCoordinator(private val store: LoadableStringStateStore) {
         }
     }
 
-    fun recoveryAction(
-        value: IssuanceSession,
-        register: PersistedTransactionOperation?,
-        records: PersistedTransactionOperation?,
-    ): IssuanceRecoveryAction = when {
+    /** Journal -> product reconciliation. Never infers broadcast outcome from product state. */
+    @Synchronized
+    fun reconcile(identity: IssuanceIdentity, operation: PersistedTransactionOperation): IssuanceSession {
+        val value = get(identity)
+        val records = operation.operationId == value.recordsOperationId
+        require(records || operation.operationId == value.registerOperationId) { "ISSUANCE_OPERATION_MISMATCH" }
+        require(operation.walletAddress.equals(value.wallet, true) && operation.chainId == identity.chainId) { "ISSUANCE_OPERATION_MISMATCH" }
+        val action = if (records) StudioActionType.ISSUE_CONFIGURE else StudioActionType.ISSUE_REGISTER
+        val legacy = if (records) ContractTransactionRunner.RECORDS_OPERATION else ContractTransactionRunner.REGISTER_OPERATION
+        require(operation.operationType == StudioOperationIdentity.type(action, value.fullName) ||
+            (value.fullName == IssuerSpace.fullName && operation.operationType == legacy)) { "ISSUANCE_OPERATION_MISMATCH" }
+        require(operation.targetAddress.equals(if (records) IssuerSpace.resolver else IssuerSpace.registry, true)) { "ISSUANCE_OPERATION_MISMATCH" }
+        val calldata = if (records) CredentialConfigurationPolicy.calldata(value) else CredentialAbi.register(
+            value.fullName.removeSuffix(".${IssuerSpace.namespace}"), value.holder, IssuerSpace.resolver, value.expiry, value.roleBitmap)
+        require(operation.valueWei == "0" && operation.dataSummary == CredentialAbi.calldataFingerprint(calldata)) { "WRITE_INTENT_MISMATCH" }
+        // A later phase must not be rolled back by an idempotent TX1 callback.
+        if (!records && value.state in setOf(IssuanceState.RECORDS_READY, IssuanceState.RECORDS_SUBMITTED,
+                IssuanceState.RECORDS_CONFIRMED, IssuanceState.AUTHORITATIVE_READBACK, IssuanceState.READY)) return value
+        val next = when (operation.state) {
+            TransactionOperationState.CONFIRMED -> if (records) {
+                if (value.state == IssuanceState.READY) IssuanceState.READY else IssuanceState.AUTHORITATIVE_READBACK
+            } else IssuanceState.REGISTERED_CONFIGURING
+            TransactionOperationState.REVERTED, TransactionOperationState.CANCELLED,
+            TransactionOperationState.NO_BROADCAST_PROVEN -> if (records) IssuanceState.REGISTERED_CONFIGURING else IssuanceState.DRAFT
+            TransactionOperationState.DRAFT, TransactionOperationState.READY_TO_REVIEW,
+            TransactionOperationState.READY_TO_SUBMIT, TransactionOperationState.SUBMISSION_CLAIMED ->
+                if (records) IssuanceState.RECORDS_READY else IssuanceState.REGISTER_READY
+            else -> if (records) IssuanceState.RECORDS_SUBMITTED else IssuanceState.REGISTER_SUBMITTED
+        }
+        return if (next == value.state) value else save(value.copy(state = next))
+    }
+
+    fun recoveryAction(value: IssuanceSession, register: PersistedTransactionOperation?,
+        records: PersistedTransactionOperation?): IssuanceRecoveryAction = when {
         value.state == IssuanceState.READY -> IssuanceRecoveryAction.DISPLAY_READY
-        value.state == IssuanceState.RECORDS_SUBMITTED && records?.state == TransactionOperationState.CONFIRMED ->
-            IssuanceRecoveryAction.READBACK
-        value.state == IssuanceState.REGISTER_SUBMITTED && register?.state == TransactionOperationState.CONFIRMED ->
-            IssuanceRecoveryAction.RESUME_RECORDS
-        value.state == IssuanceState.REGISTER_CONFIRMED && register?.state == TransactionOperationState.CONFIRMED ->
-            IssuanceRecoveryAction.RESUME_RECORDS
-        value.state == IssuanceState.RECORDS_CONFIRMED || value.state == IssuanceState.AUTHORITATIVE_READBACK ->
-            IssuanceRecoveryAction.READBACK
-        value.state == IssuanceState.RECORDS_SUBMITTED && records?.txHash != null -> IssuanceRecoveryAction.RECOVER_RECORDS
-        value.state == IssuanceState.REGISTERED_CONFIGURING -> IssuanceRecoveryAction.RESUME_RECORDS
-        value.state == IssuanceState.REGISTER_SUBMITTED && register?.txHash != null -> IssuanceRecoveryAction.RECOVER_REGISTER
+        records?.state == TransactionOperationState.CONFIRMED -> IssuanceRecoveryAction.READBACK
+        records != null && records.state !in retryable -> IssuanceRecoveryAction.RECOVER_RECORDS
+        register?.state == TransactionOperationState.CONFIRMED -> IssuanceRecoveryAction.RESUME_RECORDS
+        register != null && register.state !in retryable -> IssuanceRecoveryAction.RECOVER_REGISTER
         else -> IssuanceRecoveryAction.NONE
     }
 
-    private fun update(allowed: Set<IssuanceState>, change: (IssuanceSession) -> IssuanceSession): IssuanceSession {
-        val current = checkNotNull(session) { "ISSUANCE_SESSION_REQUIRED" }
-        require(current.state in allowed) { "ILLEGAL_ISSUANCE_TRANSITION_${current.state}" }
+    private fun update(identity: IssuanceIdentity, allowed: Set<IssuanceState>, change: (IssuanceSession) -> IssuanceSession): IssuanceSession {
+        val current = get(identity)
+        require(current.state in allowed) { "ILLEGAL_ISSUANCE_TRANSITION" }
         return save(change(current))
     }
 
     private fun save(value: IssuanceSession): IssuanceSession {
-        session = value
-        store.save(encode(value))
+        val next = LinkedHashMap(sessions)
+        next[key(value.wallet, value.fullName)] = value
+        store.save(next.values.joinToString("\n", transform = ::encode))
+        sessions.clear()
+        sessions.putAll(next)
         return value
     }
+
+    private val retryable = setOf(TransactionOperationState.REVERTED, TransactionOperationState.CANCELLED,
+        TransactionOperationState.NO_BROADCAST_PROVEN)
+
+    private fun key(wallet: String, fullName: String) = "${wallet.lowercase()}|${fullName.lowercase()}"
 
     private fun encode(value: IssuanceSession) = listOf(
         value.wallet, value.fullName, value.holder, value.expiry.toString(), value.avatarUri,
         value.description, value.state.name, value.registerOperationId.orEmpty(), value.recordsOperationId.orEmpty(),
+        value.template.name, value.accessActive.toString(), value.accessValidUntil.toString(),
+        value.transferable.toString(), value.roleBitmap.toString(), value.sessionId,
+        value.acknowledgedOwner.orEmpty(), value.acknowledgedRoles?.toString().orEmpty(),
+        value.acknowledgedTransferable?.toString().orEmpty(),
     ).joinToString("|") { escape(it) }
 
-    private fun decode(raw: String?): IssuanceSession? {
-        if (raw.isNullOrBlank()) return null
+    private fun decodeAll(raw: String?): List<IssuanceSession> = raw.orEmpty().lineSequence()
+        .filter(String::isNotBlank)
+        .mapNotNull(::decode)
+        .toList()
+
+    private fun decode(raw: String): IssuanceSession? {
         val fields = raw.split('|').map(::unescape)
-        if (fields.size != 9) return null
+        if (fields.size !in setOf(9, 14, 18)) return null
         return runCatching {
             IssuanceSession(
                 fields[0], fields[1], fields[2], BigInteger(fields[3]), fields[4], fields[5],
                 IssuanceState.valueOf(fields[6]), fields[7].ifBlank { null }, fields[8].ifBlank { null },
+                template = fields.getOrNull(9)?.let(PassTemplate::valueOf) ?: PassTemplate.STAFF,
+                accessActive = fields.getOrNull(10)?.toBooleanStrictOrNull() ?: true,
+                accessValidUntil = fields.getOrNull(11)?.let(::BigInteger) ?: BigInteger(fields[3]),
+                transferable = fields.getOrNull(12)?.toBooleanStrictOrNull() ?: false,
+                roleBitmap = fields.getOrNull(13)?.let(::BigInteger) ?: BigInteger.ZERO,
+                sessionId = fields.getOrNull(14) ?: "legacy:${fields[0].lowercase()}:${fields[1]}:${fields[7]}",
+                acknowledgedOwner = fields.getOrNull(15)?.takeIf(String::isNotBlank),
+                acknowledgedRoles = fields.getOrNull(16)?.takeIf(String::isNotBlank)?.let(::BigInteger),
+                acknowledgedTransferable = fields.getOrNull(17)?.takeIf(String::isNotBlank)?.toBooleanStrict(),
             )
         }.getOrNull()
     }

@@ -76,7 +76,7 @@ class WalletExperienceFoundationTest {
         val header = GlobalWalletHeaderPolicy.presentation(HOLDER)
         assertEquals("0x3419…5FF7", header.address)
         assertEquals(
-            setOf(ProductDestination.MY_KEYS, ProductDestination.ISSUER, ProductDestination.SETTINGS),
+            setOf(ProductDestination.MY_KEYS, ProductDestination.STUDIO, ProductDestination.SETTINGS),
             header.destinations,
         )
     }

@@ -58,7 +58,7 @@ object WalletCapabilityPresentation {
     fun issuerLabel(state: IssuerCapabilityState): String = when (state) {
         IssuerCapabilityState.ALLOWED -> "Can issue passes"
         IssuerCapabilityState.DENIED -> "Cannot issue passes"
-        IssuerCapabilityState.UNAVAILABLE -> "Issuer access unavailable"
+        IssuerCapabilityState.UNAVAILABLE -> "Studio capabilities unavailable"
     }
 }
 
@@ -99,7 +99,7 @@ data class HeaderWalletPresentation(
 object GlobalWalletHeaderPolicy {
     private val PRODUCT_DESTINATIONS = setOf(
         ProductDestination.MY_KEYS,
-        ProductDestination.ISSUER,
+        ProductDestination.STUDIO,
         ProductDestination.SETTINGS,
     )
 

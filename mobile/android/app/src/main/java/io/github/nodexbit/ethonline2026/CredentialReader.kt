@@ -32,8 +32,7 @@ data class CredentialSnapshot(
     val failureCategory: String? = null,
 ) {
     val authoritativeAllowed: Boolean
-        get() = readStatus == CredentialReadStatus.FRESH && accessActive == true &&
-            accessValidUntil != null && snapshotTimestamp != null && accessValidUntil >= snapshotTimestamp
+        get() = StudioAccessPolicy.status(this) == "Allowed"
 }
 
 data class IssuerCapability(
@@ -86,6 +85,9 @@ data class CredentialExpectation(
     val expiry: BigInteger,
     val description: String,
     val avatarUri: String,
+    val accessActive: Boolean = true,
+    val accessValidUntil: BigInteger = expiry,
+    val roleBitmap: BigInteger = BigInteger.ZERO,
 )
 
 object CredentialReadPolicy {
@@ -101,12 +103,13 @@ object CredentialReadPolicy {
         require(snapshot.snapshotTimestamp != null && snapshot.registryExpiry > snapshot.snapshotTimestamp) {
             "CREDENTIAL_EXPIRED"
         }
-        require(snapshot.ownerRoleBitmap == BigInteger.ZERO && snapshot.transferable == false) {
-            "CREDENTIAL_TRANSFERABLE"
+        require(snapshot.ownerRoleBitmap == expected.roleBitmap &&
+            snapshot.transferable == (expected.roleBitmap.and(StudioRoles.CAN_TRANSFER_ADMIN) != BigInteger.ZERO)) {
+            "WRONG_TRANSFERABILITY"
         }
         require(snapshot.description == expected.description) { "WRONG_DESCRIPTION" }
         require((snapshot.avatarUri ?: "") == expected.avatarUri) { "WRONG_AVATAR" }
-        require(snapshot.accessActive == true && snapshot.accessValidUntil == expected.expiry) {
+        require(snapshot.accessActive == expected.accessActive && snapshot.accessValidUntil == expected.accessValidUntil) {
             "WRONG_ACCESS_RECORD"
         }
         require(snapshot.accessValidUntil >= snapshot.snapshotTimestamp) { "ACCESS_EXPIRED" }
@@ -119,7 +122,7 @@ object CredentialProductPolicy {
 
     fun requireAvailable(snapshot: CredentialSnapshot) {
         require(snapshot.readStatus == CredentialReadStatus.FRESH) { "CREDENTIAL_STATE_UNKNOWN" }
-        require(snapshot.status == CredentialRegistryStatus.AVAILABLE) { "STAFF_001_NOT_AVAILABLE" }
+        require(snapshot.status == CredentialRegistryStatus.AVAILABLE) { "CREDENTIAL_NOT_AVAILABLE" }
     }
 
     fun ownedBy(snapshot: CredentialSnapshot, wallet: String): Boolean =
@@ -145,10 +148,16 @@ object CredentialFinalReadbackPolicy {
         require(session.recordsOperationId != null && session.recordsOperationId == recordsOperation?.operationId) {
             "RECORDS_OPERATION_MISSING"
         }
-        require(recordsOperation.operationType == ContractTransactionRunner.RECORDS_OPERATION) {
+        require((session.fullName == IssuerSpace.fullName && recordsOperation.operationType == ContractTransactionRunner.RECORDS_OPERATION) ||
+            recordsOperation.operationType == StudioOperationIdentity.type(
+                StudioActionType.ISSUE_CONFIGURE, session.fullName,
+            )) {
             "RECORDS_OPERATION_TYPE_MISMATCH"
         }
         require(recordsOperation.state == TransactionOperationState.CONFIRMED) { "RECORDS_NOT_CONFIRMED" }
+        require(recordsOperation.walletAddress.equals(session.wallet, true) &&
+            recordsOperation.chainId == IssuerSpace.chainId && recordsOperation.valueWei == "0" &&
+            recordsOperation.targetAddress.equals(IssuerSpace.resolver, true)) { "WRITE_INTENT_MISMATCH" }
         return recordsOperation.receiptBlock?.toBigIntegerOrNull()
             ?: throw IllegalArgumentException("RECORDS_RECEIPT_BLOCK_MISSING")
     }
@@ -260,7 +269,7 @@ class CredentialReader(private val client: ReadOnlyEthereumRpcClient) {
                     owner = resolvedOwner,
                     registryExpiry = resolvedExpiry,
                     ownerRoleBitmap = roles,
-                    transferable = roles != BigInteger.ZERO || assignments != BigInteger.ZERO,
+                    transferable = roles.and(StudioRoles.CAN_TRANSFER_ADMIN) == StudioRoles.CAN_TRANSFER_ADMIN,
                     accessActive = accessValue?.first,
                     accessValidUntil = accessValue?.second,
                     avatarUri = avatar.await(),
@@ -278,10 +287,13 @@ class CredentialReader(private val client: ReadOnlyEthereumRpcClient) {
     }
 
     suspend fun issuerCapability(account: String): IssuerCapability {
-        if (!account.equals(IssuerSpace.issuer, true)) {
-            return IssuerCapability(IssuerCapabilityState.DENIED, "NOT_CONFIGURED_ISSUER")
-        }
+        val studio = studioCapabilities(account)
+        return IssuerCapability(studio.canIssue, studio.category, studio.snapshotBlock, studio.namespaceExpiry)
+    }
+
+    suspend fun studioCapabilities(account: String): StudioCapabilities {
         return try {
+            CredentialValidation.requireAddress(account)
             require(client.chainId() == BigInteger.valueOf(IssuerSpace.chainId)) { "WRONG_CHAIN" }
             val block = client.blockByNumber("latest", false) ?: error("LATEST_BLOCK_MISSING")
             val blockNumber = quantityField(block, "number")
@@ -300,13 +312,13 @@ class CredentialReader(private val client: ReadOnlyEthereumRpcClient) {
             val owner = CredentialAbi.decodeAddress(call(IssuerSpace.parentRegistry, CredentialAbi.getOwner(keyToken), tag))
             val registry = CredentialAbi.decodeAddress(call(IssuerSpace.parentRegistry, CredentialAbi.getSubregistry("keys"), tag))
             val resolver = CredentialAbi.decodeAddress(call(IssuerSpace.parentRegistry, CredentialAbi.getResolver("keys"), tag))
-            IssuerAuthorityPolicy.evaluate(
-                account, r1Roles, s1Roles, provenance, namespaceStatus, owner, registry,
-                resolver, expiry, timestamp, blockNumber,
+            StudioCapabilityPolicy.evaluate(
+                r1Roles, s1Roles, provenance, namespaceStatus, owner, registry, resolver,
+                expiry, timestamp, blockNumber,
             )
         } catch (error: Throwable) {
             if (error is CancellationException) throw error
-            IssuerCapability(IssuerCapabilityState.UNAVAILABLE, safeCategory(error))
+            StudioCapabilities.unavailable(safeCategory(error))
         }
     }
 
@@ -354,12 +366,7 @@ class CredentialReader(private val client: ReadOnlyEthereumRpcClient) {
 
     private fun quantity(value: BigInteger) = "0x${value.toString(16)}"
     private fun hexBytes(value: String) = org.web3j.utils.Numeric.hexStringToByteArray(value)
-    private fun safeCategory(error: Throwable): String = error.message
-        ?.replace(Regex("[^A-Za-z0-9_]+"), "_")
-        ?.uppercase()
-        ?.take(80)
-        ?.ifBlank { null }
-        ?: (error::class.simpleName ?: "RPC_FAILURE").uppercase()
+    private fun safeCategory(error: Throwable): String = StudioErrors.category(error)
 
     private fun unknown(fullName: String, category: String) = CredentialSnapshot(
         fullName = fullName,

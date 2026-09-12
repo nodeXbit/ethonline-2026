@@ -2,7 +2,13 @@
 
 ## Current objective
 
-PASS WALLET POLISH: PASS.
+PASS STUDIO + SAFETY CHECKPOINT: VALIDATED.
+
+Studio adds editable STAFF/VISITOR/CONTRACTOR presets, capability-based creation and management, and separate recoverable registration/configuration reviews. Transaction coordination binds the reviewed wallet/provider generation, preserves late hashes, isolates issuance sessions, and links receipts to exact transactions. Unresolved submissions block replacement.
+
+Checkpoint validation on 2026-09-12: Android JVM tests 228/228, Node tests 173/173, debug assembly, and diff whitespace checks passed. Read-only Sepolia simulation at block 11687260 passed issuance/configuration and management for all three presets, including VISITOR owner/role changes before configuration. Existing staff state and issuer nonce 3 stayed unchanged; zero blockchain writes or signatures were performed.
+
+Dynamic selected-pass HCE and resource-aware gates have not started. They require this Studio checkpoint to be pushed and verified synchronized first.
 
 LockENS branding, the global wallet selector, automatic R1 discovery, Privy multi-wallet behavior, selected-pass persistence, and artwork rendering infrastructure are complete. The single-pass presentation physically passed on the Seeker. The real multi-pass physical stack is **NOT YET VALIDATED** because it requires 2+ real owned credentials. HCE integration of the selected pass is **NOT IMPLEMENTED**.
 
