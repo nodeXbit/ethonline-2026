@@ -9,6 +9,15 @@ import org.junit.Test
 
 class ProductUiPolicyTest {
     @Test
+    fun `LockENS brand and header accessibility labels are exact`() {
+        assertEquals("LockENS", ProductBrand.NAME)
+        assertEquals("Programmable access credentials powered by ENS", ProductBrand.SUBTITLE)
+        assertEquals("Copy wallet address", ProductBrand.COPY_WALLET_DESCRIPTION)
+        assertEquals("Sepolia Testnet", ProductBrand.NETWORK_DESCRIPTION)
+        assertFalse(NetworkPresentationPolicy.configured().interactive)
+    }
+
+    @Test
     fun `logged out shell contains no product destinations`() {
         assertTrue(ProductShellPolicy.loggedOutVisible(authenticated = false))
         assertTrue(ProductShellPolicy.destinations(authenticated = false, issuerCapability = true).isEmpty())

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ENS Access</string>
+    <string name="app_name">LockENS</string>
     <string name="gate_b_placeholder">ENSv2 Access Demo\nGate B — Privy holder signing</string>
     <string name="gate_c1_hce_service">ENSv2 Gate C1 credential transport</string>
 </resources>

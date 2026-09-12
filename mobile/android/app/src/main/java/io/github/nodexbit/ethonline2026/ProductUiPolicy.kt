@@ -2,6 +2,13 @@ package io.github.nodexbit.ethonline2026
 
 enum class ProductDestination { MY_KEYS, ISSUER, SETTINGS, DIAGNOSTICS }
 
+object ProductBrand {
+    const val NAME = "LockENS"
+    const val SUBTITLE = "Programmable access credentials powered by ENS"
+    const val COPY_WALLET_DESCRIPTION = "Copy wallet address"
+    const val NETWORK_DESCRIPTION = "Sepolia Testnet"
+}
+
 data class ProductContentPadding(val left: Int, val top: Int, val right: Int, val bottom: Int)
 
 data class ReviewDialogActionPlan(

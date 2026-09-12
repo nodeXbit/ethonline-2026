@@ -54,6 +54,72 @@ class WalletExperienceFoundationTest {
     }
 
     @Test
+    fun `wallet picker presents one wallet with active indicator and explicit create action`() {
+        val picker = WalletPickerPolicy.presentation(listOf(wallet(HOLDER, 0)), HOLDER)
+        assertEquals(listOf(WalletPickerItem(HOLDER, active = true)), picker.items)
+        assertTrue(picker.createWalletActionVisible)
+    }
+
+    @Test
+    fun `wallet picker orders multiple wallets and selection invokes callback`() {
+        val wallets = listOf(wallet(ISSUER, 2), wallet(HOLDER, 0))
+        val picker = WalletPickerPolicy.presentation(wallets, HOLDER)
+        assertEquals(listOf(HOLDER, ISSUER), picker.items.map { it.address })
+        assertEquals(listOf(true, false), picker.items.map { it.active })
+        var selected: ActiveWallet? = null
+        WalletPickerPolicy.select(wallets, ISSUER) { selected = it }
+        assertEquals(ISSUER, selected?.address)
+    }
+
+    @Test
+    fun `global header presents current wallet on every authenticated product destination`() {
+        val header = GlobalWalletHeaderPolicy.presentation(HOLDER)
+        assertEquals("0x3419…5FF7", header.address)
+        assertEquals(
+            setOf(ProductDestination.MY_KEYS, ProductDestination.ISSUER, ProductDestination.SETTINGS),
+            header.destinations,
+        )
+    }
+
+    @Test
+    fun `header wallet area opens selector while copy cannot change active wallet`() {
+        val open = GlobalWalletHeaderPolicy.walletAreaAction()
+        assertTrue(open.openSelector)
+        assertNull(open.copyAddress)
+        assertNull(open.selectedAddress)
+
+        val copy = GlobalWalletHeaderPolicy.copyAction(HOLDER)
+        assertFalse(copy.openSelector)
+        assertEquals(HOLDER, copy.copyAddress)
+        assertNull(copy.selectedAddress)
+    }
+
+    @Test
+    fun `settings is detailed management without a duplicate primary selector`() {
+        val settings = SettingsAccountPolicy.detailedManagement()
+        assertFalse(settings.primaryWalletSelectorVisible)
+        assertTrue(settings.fullAddressVisible)
+        assertTrue(settings.createWalletActionVisible)
+    }
+
+    @Test
+    fun `address copy returns only validated public address`() {
+        assertEquals(HOLDER, AddressCopyPolicy.publicAddress(HOLDER))
+        assertThrows(IllegalArgumentException::class.java) {
+            AddressCopyPolicy.publicAddress("privy:wallet-secret-id")
+        }
+    }
+
+    @Test
+    fun `configured Sepolia network presentation is non interactive`() {
+        val network = NetworkPresentationPolicy.configured()
+        assertEquals("Ethereum", network.ecosystem)
+        assertEquals("Sepolia Testnet", network.network)
+        assertEquals(11155111L, network.chainId)
+        assertFalse(network.interactive)
+    }
+
+    @Test
     fun `selected pass persists per wallet and invalidates on ownership mismatch`() {
         val store = MemoryStore()
         val selected = SelectedPassStore(store)
@@ -82,6 +148,65 @@ class WalletExperienceFoundationTest {
         assertEquals(PassCardMode.STACKED_SELECTED, PassStackPolicy.mode(3, true))
         assertEquals(0, PassStackPolicy.overlapDp(1, 0))
         assertTrue(PassStackPolicy.overlapDp(3, 1) < 0)
+    }
+
+    @Test
+    fun `selected pass is ordered in foreground and tap model changes selection`() {
+        val first = snapshot().copy(fullName = "alpha.keys.demo-access.eth")
+        val selected = snapshot().copy(fullName = "visitor.keys.demo-access.eth")
+        val ordered = PassStackPolicy.ordered(listOf(selected, first), selected.fullName)
+        assertEquals(listOf(first.fullName, selected.fullName), ordered.map { it.fullName })
+
+        val store = MemoryStore()
+        SelectedPassStore(store).select(IssuerSpace.chainId, HOLDER, selected)
+        assertEquals(selected.fullName, SelectedPassStore(store).selected(IssuerSpace.chainId, HOLDER))
+    }
+
+    @Test
+    fun `artwork policy supports safe HTTPS and isolated IPFS gateway only`() {
+        assertEquals(PassArtworkSource.Fallback, PassArtworkPolicy.source(""))
+        assertEquals(
+            PassArtworkSource.Remote("https://images.example/pass.png"),
+            PassArtworkPolicy.source("https://images.example/pass.png"),
+        )
+        assertEquals(
+            PassArtworkSource.Remote("https://ipfs.io/ipfs/bafyPass123/art.png"),
+            PassArtworkPolicy.source("ipfs://bafyPass123/art.png"),
+        )
+        listOf(
+            "http://images.example/pass.png",
+            "file:///data/pass.png",
+            "javascript:alert(1)",
+            "data:image/png;base64,AAAA",
+            "https://user:password@images.example/pass.png",
+            "https://localhost/pass.png",
+            "https://127.0.0.1/pass.png",
+            "https://2130706433/pass.png",
+            "https://0x7f000001/pass.png",
+            "https://192.168.1.10/pass.png",
+            "https://images.example:8443/pass.png",
+            "ipfs://bafyPass123/../private.png",
+        ).forEach { assertEquals(PassArtworkSource.Fallback, PassArtworkPolicy.source(it)) }
+    }
+
+    @Test
+    fun `artwork load failure retains deterministic fallback`() {
+        val source = PassArtworkPolicy.source("https://images.example/missing.png")
+        assertTrue(PassArtworkDisplayPolicy.useFallback(source, bitmapAvailable = false))
+        assertFalse(PassArtworkDisplayPolicy.useFallback(source, bitmapAvailable = true))
+        assertTrue(PassArtworkDisplayPolicy.useFallback(PassArtworkSource.Fallback, bitmapAvailable = true))
+    }
+
+    @Test
+    fun `selected pass persists independently for each wallet`() {
+        val store = MemoryStore()
+        val selections = SelectedPassStore(store)
+        val holderPass = snapshot(owner = HOLDER)
+        val issuerPass = snapshot(owner = ISSUER).copy(fullName = "issuer.keys.demo-access.eth")
+        selections.select(IssuerSpace.chainId, HOLDER, holderPass)
+        selections.select(IssuerSpace.chainId, ISSUER, issuerPass)
+        assertEquals(holderPass.fullName, SelectedPassStore(store).selected(IssuerSpace.chainId, HOLDER))
+        assertEquals(issuerPass.fullName, SelectedPassStore(store).selected(IssuerSpace.chainId, ISSUER))
     }
 
     @Test

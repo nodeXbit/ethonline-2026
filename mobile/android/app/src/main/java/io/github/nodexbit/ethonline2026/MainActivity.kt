@@ -24,6 +24,9 @@ import android.view.WindowInsets
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -90,8 +93,11 @@ class MainActivity : Activity() {
     private lateinit var diagnosticsSection: LinearLayout
     private lateinit var actionFailureText: TextView
     private lateinit var shellIdentityText: TextView
+    private lateinit var shellWalletArea: LinearLayout
+    private lateinit var shellCopyWalletButton: ImageButton
+    private lateinit var shellWalletAffordance: TextView
     private lateinit var settingsIdentityText: TextView
-    private lateinit var walletsList: LinearLayout
+    private lateinit var settingsWalletCountText: TextView
     private lateinit var capabilityStatusText: TextView
     private lateinit var createWalletButton: Button
     private lateinit var shellFeedbackText: TextView
@@ -115,6 +121,7 @@ class MainActivity : Activity() {
     private var credentialRefreshJob: Job? = null
     private val credentialRpcClient by lazy { ReadOnlyEthereumRpcClient() }
     private val credentialReader by lazy { CredentialReader(credentialRpcClient) }
+    private val passArtworkLoader by lazy { PassArtworkLoader() }
     private val credentialFinalReadback by lazy {
         CredentialFinalReadbackReconciler(read = { fullName -> credentialReader.read(fullName) })
     }
@@ -235,7 +242,7 @@ class MainActivity : Activity() {
         restoringView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            addView(productTitle("ENS Access").apply { gravity = Gravity.CENTER }, matchWrapParams())
+            addView(productTitle(ProductBrand.NAME).apply { gravity = Gravity.CENTER }, matchWrapParams())
             restoringStatusText = productBody("Restoring your secure session…").apply {
                 gravity = Gravity.CENTER
                 setPadding(0, dp(10), 0, 0)
@@ -249,8 +256,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_HORIZONTAL
             visibility = View.GONE
         }
-        loggedOutView.addView(productTitle("ENS Access"), matchWrapParams())
-        loggedOutView.addView(productBody("Programmable credentials powered by ENS").apply {
+        loggedOutView.addView(productTitle(ProductBrand.NAME), matchWrapParams())
+        loggedOutView.addView(productBody(ProductBrand.SUBTITLE).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(4), 0, dp(28))
         }, matchWrapParams())
@@ -282,22 +289,72 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             visibility = View.GONE
         }
-        val top = LinearLayout(this).apply {
+        val titleRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        brand.addView(productTitle("ENS Access"), matchWrapParams())
-        shellIdentityText = accountChip("Wallet not ready")
-        brand.addView(shellIdentityText, ViewGroup.LayoutParams(
+        titleRow.addView(productTitle(ProductBrand.NAME), LinearLayout.LayoutParams(
+            0,
             ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-        ))
-        top.addView(brand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            1f,
+        ).apply {
             marginEnd = dp(12)
         })
-        top.addView(statusChip("Sepolia", positive = true), ViewGroup.LayoutParams(dp(92), dp(36)))
-        authenticatedView.addView(top, matchWrapParams())
+        titleRow.addView(headerNetworkChip(), ViewGroup.LayoutParams(dp(110), dp(40)))
+        authenticatedView.addView(titleRow, matchWrapParams())
+
+        shellWalletArea = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+            setPadding(dp(14), dp(8), dp(8), dp(8))
+            background = roundedBackground(surfaceMutedColor(), dp(17).toFloat(), borderColor())
+            isClickable = true
+            isFocusable = true
+            contentDescription = "Active wallet not ready"
+            setOnClickListener {
+                if (GlobalWalletHeaderPolicy.walletAreaAction().openSelector) showWalletSelector()
+            }
+        }
+        val headerWalletIdentity = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        headerWalletIdentity.addView(productCaption("ACTIVE WALLET").apply {
+            textSize = 10f
+            setPadding(0, 0, 0, dp(1))
+        }, matchWrapParams())
+        shellIdentityText = productHeading("Wallet not ready").apply {
+            textSize = 17f
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            maxLines = 1
+        }
+        headerWalletIdentity.addView(shellIdentityText, matchWrapParams())
+        shellWalletArea.addView(headerWalletIdentity, LinearLayout.LayoutParams(
+            0,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            1f,
+        ))
+        shellCopyWalletButton = ImageButton(this).apply {
+            setImageResource(R.drawable.ic_copy)
+            imageTintList = ColorStateList.valueOf(textPrimaryColor())
+            backgroundTintList = ColorStateList.valueOf(surfaceMutedColor())
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(13), dp(13), dp(13), dp(13))
+            isEnabled = false
+            contentDescription = ProductBrand.COPY_WALLET_DESCRIPTION
+            setOnClickListener { copyWalletAddressFromHeader() }
+        }
+        shellWalletArea.addView(shellCopyWalletButton, LinearLayout.LayoutParams(dp(48), dp(48)).apply {
+            marginStart = dp(6)
+        })
+        shellWalletAffordance = productHeading("▼").apply {
+            textSize = 14f
+            gravity = Gravity.CENTER
+            contentDescription = "Open wallet selector"
+        }
+        shellWalletArea.addView(shellWalletAffordance, LinearLayout.LayoutParams(dp(36), dp(48)))
+        authenticatedView.addView(shellWalletArea, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(10) })
 
         navigationBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -400,36 +457,45 @@ class MainActivity : Activity() {
         settingsSection.addView(sectionHeader("SETTINGS", "Account, network, and developer tools."), matchWrapParams())
         val accountCard = productCard()
         accountCard.addView(productCaption("ACCOUNT"), matchWrapParams())
-        accountCard.addView(productCaption("ACTIVE WALLET"), matchWrapParams())
-        settingsIdentityText = productBody("Wallet not ready").apply {
-            setTextColor(textPrimaryColor())
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, 0, 0, dp(12))
-        }
+        settingsIdentityText = productCaption("ACTIVE WALLET ADDRESS")
         accountCard.addView(settingsIdentityText, matchWrapParams())
-        walletText = productBody("Current wallet\nNot available").apply {
+        walletText = productBody("Not available").apply {
             textSize = 14f
+            setTextColor(textPrimaryColor())
             setTypeface(Typeface.MONOSPACE)
             setTextIsSelectable(true)
+            setPadding(0, dp(2), 0, dp(8))
         }
         accountCard.addView(walletText, matchWrapParams())
         copyWalletButton = productButton("Copy full address", primary = false, action = ::copyWalletAddress).apply {
             isEnabled = false
+            contentDescription = "Copy full active wallet address"
         }
         accountCard.addView(copyWalletButton, matchWrapParams())
         capabilityStatusText = productBody(WalletCapabilityPresentation.issuerLabel(IssuerCapabilityState.UNAVAILABLE)).apply {
+            textSize = 13f
+            setTextColor(textPrimaryColor())
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+            background = roundedBackground(surfaceMutedColor(), dp(15).toFloat(), borderColor())
+        }
+        accountCard.addView(capabilityStatusText, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            topMargin = dp(12)
+            bottomMargin = dp(4)
+        })
+        settingsWalletCountText = productBody("No embedded wallets").apply {
             setPadding(0, dp(12), 0, dp(4))
         }
-        accountCard.addView(capabilityStatusText, matchWrapParams())
-        accountCard.addView(productCaption("WALLETS").apply { setPadding(0, dp(16), 0, dp(6)) }, matchWrapParams())
-        walletsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        accountCard.addView(walletsList, matchWrapParams())
+        accountCard.addView(settingsWalletCountText, matchWrapParams())
         createWalletButton = productButton("Create wallet", primary = false, action = ::createAnotherWallet)
         accountCard.addView(createWalletButton, matchWrapParams())
         val logoutButton = productButton("Switch account / Log out", primary = false, action = ::logout)
-        accountCard.addView(logoutButton, matchWrapParams())
+        accountCard.addView(logoutButton, actionParams())
         settingsSection.addView(accountCard, cardParams())
-        settingsSection.addView(detailCard("NETWORK", listOf("Selected network" to "Sepolia")), cardParams())
+        settingsSection.addView(networkCard(), cardParams())
         val developerCard = productCard()
         developerCard.addView(productCaption("DEVELOPER OPTIONS"), matchWrapParams())
         developerCard.addView(productBody("Admission, signing, HCE, and transaction diagnostics."), matchWrapParams())
@@ -684,6 +750,27 @@ class MainActivity : Activity() {
         background = roundedBackground(surfaceMutedColor(), dp(18).toFloat(), borderColor())
     }
 
+    private fun headerNetworkChip() = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        isClickable = false
+        isFocusable = false
+        contentDescription = ProductBrand.NETWORK_DESCRIPTION
+        background = roundedBackground(surfaceMutedColor(), dp(20).toFloat(), borderColor())
+        addView(ImageView(this@MainActivity).apply {
+            setImageResource(R.drawable.ic_ethereum_network)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(dp(22), dp(22)).apply { marginEnd = dp(5) })
+        addView(productBody("Sepolia").apply {
+            textSize = 13f
+            setTextColor(successColor())
+            setTypeface(typeface, Typeface.BOLD)
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ))
+    }
+
     private fun accountChip(textValue: String) = productBody(textValue).apply {
         textSize = 13f
         setTextColor(textPrimaryColor())
@@ -714,6 +801,30 @@ class MainActivity : Activity() {
     private fun detailCard(title: String, values: List<Pair<String, String>>) = productCard().apply {
         addView(productCaption(title), matchWrapParams())
         values.forEach { (label, value) -> addView(valueRow(label, value), matchWrapParams()) }
+    }
+
+    private fun networkCard() = productCard().apply {
+        val network = NetworkPresentationPolicy.configured()
+        addView(productCaption("NETWORK"), matchWrapParams())
+        addView(LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            minimumHeight = dp(64)
+            isClickable = network.interactive
+            isFocusable = network.interactive
+            contentDescription = "${network.ecosystem}, ${network.network}, Chain ID ${network.chainId}"
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_ethereum_network)
+                contentDescription = "Ethereum"
+            }, LinearLayout.LayoutParams(dp(42), dp(42)).apply { marginEnd = dp(14) })
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(productHeading(network.network).apply { textSize = 18f }, matchWrapParams())
+                addView(productBody("${network.ecosystem} · Chain ID ${network.chainId}").apply {
+                    textSize = 13f
+                }, matchWrapParams())
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }, matchWrapParams())
     }
 
     private fun valueRow(label: String, value: String) = LinearLayout(this).apply {
@@ -825,57 +936,170 @@ class MainActivity : Activity() {
         mode: PassCardMode,
         selected: Boolean,
         onSelect: () -> Unit,
-    ) = productCard().apply {
+    ) = LinearLayout(this).apply {
         val fullName = snapshot.fullName
         val artwork = snapshot.avatarUri.orEmpty()
         val access = if (snapshot.authoritativeAllowed) "Allowed" else "Not allowed"
         val label = fullName.substringBefore('.')
         val passType = if (label.startsWith("staff-")) "STAFF ACCESS" else "ACCESS PASS"
+        orientation = LinearLayout.VERTICAL
+        background = roundedBackground(
+            surfaceColor(),
+            dp(22).toFloat(),
+            if (selected) accentColor() else borderColor(),
+        )
+        clipToOutline = true
         elevation = dp(if (selected) 12 else 3).toFloat()
+        minimumHeight = dp(if (mode == PassCardMode.STACKED_SUMMARY) 118 else 260)
+        isClickable = true
+        isFocusable = true
+        contentDescription = buildString {
+            append("$passType, $fullName, $access, valid until ${formatPassExpiry(snapshot.registryExpiry)}")
+            if (selected) append(", selected pass") else append(", tap to select")
+        }
         setOnClickListener { onSelect() }
-        val header = LinearLayout(this@MainActivity).apply {
+        val hero = FrameLayout(this@MainActivity).apply {
+            background = deterministicPassBackground(fullName)
+            clipToOutline = true
+        }
+        hero.addView(TextView(this@MainActivity).apply {
+            text = if (passType == "STAFF ACCESS") "SA" else "PASS"
+            gravity = Gravity.CENTER
+            textSize = if (passType == "STAFF ACCESS") 54f else 34f
+            letterSpacing = 0.08f
+            setTextColor(Color.argb(185, 255, 255, 255))
+            setTypeface(typeface, Typeface.BOLD)
+            contentDescription = "Deterministic pass artwork fallback"
+        }, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        ))
+        val artworkView = ImageView(this@MainActivity).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            visibility = View.GONE
+            contentDescription = "Pass artwork"
+        }
+        hero.addView(artworkView, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        ))
+        loadPassArtwork(artwork, artworkView)
+        hero.addView(View(this@MainActivity).apply {
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(Color.TRANSPARENT, Color.argb(220, 12, 9, 22)),
+            )
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        ))
+        val overlay = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.BOTTOM
+            setPadding(dp(16), dp(14), dp(16), dp(16))
+        }
+        val badges = LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            addView(passOverlayLabel(access.uppercase()), LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(32),
+            ))
+            if (selected) addView(passOverlayLabel("SELECTED PASS"), LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                dp(32),
+            ).apply { marginStart = dp(8) })
         }
-        val placeholder = TextView(this@MainActivity).apply {
-            text = if (passType == "STAFF ACCESS") "SA" else "AP"
-            gravity = Gravity.CENTER
-            textSize = 20f
-            setTextColor(Color.WHITE)
-            setTypeface(typeface, Typeface.BOLD)
-            background = roundedBackground(accentColor(), dp(16).toFloat())
-            contentDescription = if (artwork.isBlank()) "Access pass artwork placeholder" else "Access pass artwork"
-        }
-        header.addView(placeholder, LinearLayout.LayoutParams(dp(66), dp(66)).apply { marginEnd = dp(14) })
-        val identity = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-        identity.addView(productCaption(passType), matchWrapParams())
-        identity.addView(productHeading(fullName).apply {
-            textSize = 17f
-            maxLines = 2
+        overlay.addView(badges, matchWrapParams())
+        overlay.addView(passOverlayText(passType, 13f, true).apply { setPadding(0, dp(10), 0, 0) }, matchWrapParams())
+        overlay.addView(passOverlayText(fullName, if (mode == PassCardMode.STACKED_SUMMARY) 16f else 20f, true).apply {
+            maxLines = if (mode == PassCardMode.STACKED_SUMMARY) 1 else 2
         }, matchWrapParams())
-        header.addView(identity, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        if (selected) {
-            header.addView(statusChip("SELECTED", positive = true), LinearLayout.LayoutParams(dp(104), dp(34)))
-        }
-        addView(header, matchWrapParams())
-        addView(statusChip(access.uppercase(), positive = access == "Allowed"), LinearLayout.LayoutParams(dp(116), dp(36)).apply {
-            topMargin = dp(16)
-            bottomMargin = dp(10)
-        })
-        addView(valueRow("Valid until", formatPassExpiry(snapshot.registryExpiry)), matchWrapParams())
+        overlay.addView(passOverlayText("Valid until ${formatPassExpiry(snapshot.registryExpiry)}", 14f, false), matchWrapParams())
+        hero.addView(overlay, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT,
+        ))
+        addView(hero, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(if (mode == PassCardMode.STACKED_SUMMARY) 132 else 226),
+        ))
         if (mode != PassCardMode.STACKED_SUMMARY) {
-            addView(productBody(if (snapshot.transferable == false) "Non-transferable" else "Transferable").apply {
-                setTextColor(textPrimaryColor())
-                setTypeface(typeface, Typeface.BOLD)
-                setPadding(0, dp(2), 0, dp(12))
-            }, matchWrapParams())
-            addView(valueRow("Description", snapshot.description.orEmpty().ifBlank { "Not set" }), matchWrapParams())
-            addView(valueRow("Owner", snapshot.owner.orEmpty()), matchWrapParams())
-            addView(valueRow("Issuer registry", ProductShellPolicy.compactAddress(snapshot.registry)), matchWrapParams())
-            addView(valueRow("Provenance", if (snapshot.provenanceMatches) "Verified" else "Unavailable"), matchWrapParams())
-            if (artwork.isNotBlank()) addView(productCaption("ARTWORK LINKED"), matchWrapParams())
-        } else {
-            addView(productBody("Tap to select and expand").apply { setPadding(0, dp(4), 0, 0) }, matchWrapParams())
+            val details = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                visibility = View.GONE
+                setPadding(dp(16), 0, dp(16), dp(12))
+                addView(valueRow("Description", snapshot.description.orEmpty().ifBlank { "Not set" }), matchWrapParams())
+                addView(valueRow("Transferability", if (snapshot.transferable == false) "Non-transferable" else "Transferable"), matchWrapParams())
+                addView(valueRow("Current owner", snapshot.owner.orEmpty()), matchWrapParams())
+                addView(valueRow("Issuer registry", ProductShellPolicy.compactAddress(snapshot.registry)), matchWrapParams())
+                addView(valueRow("Provenance", if (snapshot.provenanceMatches) "Verified" else "Unavailable"), matchWrapParams())
+                addView(valueRow("Artwork URI", artwork.ifBlank { "Not set" }), matchWrapParams())
+            }
+            lateinit var detailsButton: Button
+            detailsButton = productButton("View pass details", primary = false) {
+                val expanding = details.visibility != View.VISIBLE
+                details.visibility = if (expanding) View.VISIBLE else View.GONE
+                detailsButton.text = if (expanding) "Hide pass details" else "View pass details"
+            }
+            addView(detailsButton, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(ProductSpacing.CONTROL_HEIGHT_DP),
+            ).apply {
+                marginStart = dp(14)
+                marginEnd = dp(14)
+                topMargin = dp(10)
+                bottomMargin = dp(10)
+            })
+            addView(details, matchWrapParams())
+        }
+    }
+
+    private fun passOverlayLabel(value: String) = TextView(this).apply {
+        text = value
+        gravity = Gravity.CENTER
+        textSize = 11f
+        setTextColor(Color.WHITE)
+        setTypeface(typeface, Typeface.BOLD)
+        setPadding(dp(10), 0, dp(10), 0)
+        background = roundedBackground(Color.argb(185, 22, 18, 30), dp(16).toFloat(), Color.argb(110, 255, 255, 255))
+    }
+
+    private fun passOverlayText(value: String, size: Float, bold: Boolean) = TextView(this).apply {
+        text = value
+        textSize = size
+        setTextColor(Color.WHITE)
+        if (bold) setTypeface(typeface, Typeface.BOLD)
+        setShadowLayer(dp(2).toFloat(), 0f, dp(1).toFloat(), Color.BLACK)
+    }
+
+    private fun deterministicPassBackground(identity: String): GradientDrawable {
+        val palettes = arrayOf(
+            intArrayOf(Color.parseColor("#6846D6"), Color.parseColor("#24164D")),
+            intArrayOf(Color.parseColor("#166B78"), Color.parseColor("#102E4A")),
+            intArrayOf(Color.parseColor("#9A4D33"), Color.parseColor("#3E1836")),
+        )
+        return GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            palettes[(identity.hashCode() and Int.MAX_VALUE) % palettes.size],
+        ).apply { cornerRadius = dp(22).toFloat() }
+    }
+
+    private fun loadPassArtwork(rawUri: String, target: ImageView) {
+        val source = PassArtworkPolicy.source(rawUri) as? PassArtworkSource.Remote ?: return
+        target.tag = source.url
+        passArtworkLoader.cached(source.url)?.let {
+            target.setImageBitmap(it)
+            target.visibility = View.VISIBLE
+            return
+        }
+        activityScope.launch {
+            val bitmap = withContext(Dispatchers.IO) { passArtworkLoader.load(source.url) }
+            if (bitmap != null && target.tag == source.url) {
+                target.setImageBitmap(bitmap)
+                target.visibility = View.VISIBLE
+            }
         }
     }
 
@@ -1081,13 +1305,17 @@ class MainActivity : Activity() {
             credentialRefreshJob?.cancel()
             credentialRefreshJob = null
             contractRunner = null
-            walletText.text = "Current wallet\nNot available"
-            settingsIdentityText.text = "Wallet not ready"
+            shellIdentityText.text = "Wallet not ready"
+            shellWalletArea.contentDescription = "Active wallet not ready"
+            shellWalletArea.isEnabled = false
+            shellCopyWalletButton.isEnabled = false
+            walletText.text = "Not available"
+            settingsIdentityText.text = "ACTIVE WALLET ADDRESS"
             copyWalletButton.isEnabled = false
             issuerCapabilityConfirmed = false
             issuerCapabilityState = IssuerCapabilityState.UNAVAILABLE
             issuerNavButton.visibility = View.GONE
-            walletsList.removeAllViews()
+            settingsWalletCountText.text = "No embedded wallets"
             capabilityStatusText.text = WalletCapabilityPresentation.issuerLabel(issuerCapabilityState)
             myKeysCards.removeAllViews()
             myKeysEmptyCard.visibility = View.VISIBLE
@@ -1132,8 +1360,12 @@ class MainActivity : Activity() {
         }
         if (selected == null) {
             showAuthenticatedShell()
-            shellIdentityText.text = "Account setup\nWallet not ready"
-            settingsIdentityText.text = "Wallet not ready"
+            shellIdentityText.text = "Wallet not ready"
+            shellWalletArea.contentDescription = "Active wallet not ready"
+            shellWalletArea.isEnabled = false
+            shellCopyWalletButton.isEnabled = false
+            walletText.text = "Not available"
+            settingsIdentityText.text = "ACTIVE WALLET ADDRESS"
             renderWallets()
             showHceSignerStatus("CREATE WALLET FIRST")
             showStatus(status)
@@ -1150,9 +1382,13 @@ class MainActivity : Activity() {
         credentialRefreshJob = null
         issuerCapabilityConfirmed = false
         issuerCapabilityState = IssuerCapabilityState.UNAVAILABLE
-        shellIdentityText.text = WalletCapabilityPresentation.identity(wallet.address)
-        settingsIdentityText.text = WalletCapabilityPresentation.identity(wallet.address)
-        walletText.text = "Current wallet\n${wallet.address}"
+        val header = GlobalWalletHeaderPolicy.presentation(wallet.address)
+        shellIdentityText.text = header.address
+        shellWalletArea.contentDescription = "Active wallet ${header.address}. Choose wallet"
+        shellWalletArea.isEnabled = true
+        shellCopyWalletButton.isEnabled = true
+        settingsIdentityText.text = "ACTIVE WALLET ADDRESS"
+        walletText.text = wallet.address
         capabilityStatusText.text = WalletCapabilityPresentation.issuerLabel(issuerCapabilityState)
         copyWalletButton.isEnabled = true
         lastOwnedCredentials = emptyList()
@@ -1183,29 +1419,80 @@ class MainActivity : Activity() {
     )
 
     private fun renderWallets() {
-        walletsList.removeAllViews()
-        authenticatedWallets.sortedWith(compareBy<EmbeddedEthereumWallet> { it.hdWalletIndex }.thenBy { it.address })
-            .forEach { wallet ->
-                val active = wallet.address.equals(ethereumWallet?.address, true)
-                val row = LinearLayout(this).apply {
+        settingsWalletCountText.text = when (authenticatedWallets.size) {
+            0 -> "No embedded wallets"
+            1 -> "1 embedded Ethereum wallet"
+            else -> "${authenticatedWallets.size} embedded Ethereum wallets"
+        }
+        createWalletButton.text = "+ Create new wallet"
+    }
+
+    private fun showWalletSelector() {
+        val models = authenticatedWallets.map(::walletModel)
+        val presentation = WalletPickerPolicy.presentation(models, ethereumWallet?.address)
+        lateinit var dialog: AlertDialog
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), dp(8))
+            presentation.items.forEach { item ->
+                addView(LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
-                    setPadding(0, dp(5), 0, dp(5))
-                }
-                row.addView(productBody(ProductShellPolicy.compactAddress(wallet.address)).apply {
-                    setTextColor(textPrimaryColor())
-                    setTypeface(Typeface.MONOSPACE)
-                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                if (active) {
-                    row.addView(statusChip("ACTIVE", positive = true), LinearLayout.LayoutParams(dp(92), dp(34)))
-                } else {
-                    row.addView(productButton("Select", primary = false) {
-                        selectWallet(wallet, "Active wallet changed. My Keys and capabilities refreshed.")
-                    }, LinearLayout.LayoutParams(dp(104), dp(44)))
-                }
-                walletsList.addView(row, matchWrapParams())
+                    minimumHeight = dp(56)
+                    setPadding(dp(12), dp(5), dp(12), dp(5))
+                    background = roundedBackground(
+                        if (item.active) surfaceMutedColor() else Color.TRANSPARENT,
+                        dp(12).toFloat(),
+                    )
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = if (item.active) {
+                        "Current wallet ${ProductShellPolicy.compactAddress(item.address)}"
+                    } else {
+                        "Select wallet ${ProductShellPolicy.compactAddress(item.address)}"
+                    }
+                    setOnClickListener {
+                        if (item.active) {
+                            dialog.dismiss()
+                        } else {
+                            WalletPickerPolicy.select(models, item.address) { selected ->
+                                val wallet = authenticatedWallets.single {
+                                    it.address.equals(selected.address, ignoreCase = true)
+                                }
+                                dialog.dismiss()
+                                selectWallet(wallet, "Active wallet changed. My Keys and capabilities refreshed.")
+                            }
+                        }
+                    }
+                    addView(productBody(if (item.active) "✓" else "").apply {
+                        gravity = Gravity.CENTER
+                        setTextColor(successColor())
+                        setTypeface(typeface, Typeface.BOLD)
+                    }, LinearLayout.LayoutParams(dp(30), ViewGroup.LayoutParams.WRAP_CONTENT))
+                    addView(productBody(ProductShellPolicy.compactAddress(item.address)).apply {
+                        setTextColor(textPrimaryColor())
+                        setTypeface(Typeface.MONOSPACE)
+                    }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    if (item.active) addView(productCaption("CURRENT"), LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ))
+                }, matchWrapParams())
             }
-        createWalletButton.text = if (authenticatedWallets.isEmpty()) "Create wallet" else "Create another wallet"
+            addView(productButton("+ Create new wallet", primary = false) {
+                dialog.dismiss()
+                createAnotherWallet()
+            }, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(ProductSpacing.CONTROL_HEIGHT_DP),
+            ).apply { topMargin = dp(12) })
+        }
+        dialog = AlertDialog.Builder(this)
+            .setTitle("Select wallet")
+            .setView(content)
+            .setNegativeButton("Close", null)
+            .create()
+        dialog.show()
     }
 
     private fun resetMobileIssuerAdmission(wallet: EmbeddedEthereumWallet) {
@@ -1280,8 +1567,7 @@ class MainActivity : Activity() {
             issuerCapabilityState = capability.state
             issuerCapabilityConfirmed = capability.allowed
             issuerNavButton.visibility = if (capability.allowed) View.VISIBLE else View.GONE
-            shellIdentityText.text = WalletCapabilityPresentation.identity(walletAddress)
-            settingsIdentityText.text = WalletCapabilityPresentation.identity(walletAddress)
+            shellIdentityText.text = GlobalWalletHeaderPolicy.presentation(walletAddress).address
             capabilityStatusText.text = WalletCapabilityPresentation.issuerLabel(capability.state)
             if (!capability.allowed && currentDestination == ProductDestination.ISSUER) {
                 showDestination(ProductDestination.MY_KEYS)
@@ -1708,9 +1994,7 @@ class MainActivity : Activity() {
         }
         myKeysEmptyCard.visibility = View.GONE
         myKeysActions.visibility = View.VISIBLE
-        val ordered = credentials.sortedWith(
-            compareBy<CredentialSnapshot> { it.fullName == selectedName }.thenBy { it.fullName },
-        )
+        val ordered = PassStackPolicy.ordered(credentials, selectedName)
         ordered.forEachIndexed { index, snapshot ->
             val selected = snapshot.fullName == selectedName
             val mode = PassStackPolicy.mode(ordered.size, selected)
@@ -1718,7 +2002,7 @@ class MainActivity : Activity() {
                 credentialCard(snapshot, mode, selected) {
                     selectedPassStore.select(IssuerSpace.chainId, wallet, snapshot)
                     renderCredentialStack(wallet, lastOwnedCredentials, snapshot.fullName)
-                    showStatus("Pass selected for future presentation. NFC behavior is unchanged.")
+                    showStatus("Pass selected.")
                 },
                 cardParams().apply { topMargin = dp(PassStackPolicy.overlapDp(ordered.size, index)) },
             )
@@ -2085,7 +2369,13 @@ class MainActivity : Activity() {
 
     private fun copyWalletAddress() {
         val address = ethereumWallet?.address ?: return
-        copyPublicProof("Privy wallet address", address)
+        copyPublicProof("Wallet address", AddressCopyPolicy.publicAddress(address))
+    }
+
+    private fun copyWalletAddressFromHeader() {
+        val address = ethereumWallet?.address ?: return
+        val action = GlobalWalletHeaderPolicy.copyAction(address)
+        copyPublicProof("Wallet address", checkNotNull(action.copyAddress))
     }
 
     private fun copySignature() {
@@ -2195,6 +2485,8 @@ class MainActivity : Activity() {
         if (::copyCredentialButton.isInitialized) copyCredentialButton.isEnabled = !isBusy
         if (::artworkInput.isInitialized) artworkInput.isEnabled = !isBusy
         copyWalletButton.isEnabled = !isBusy && ethereumWallet != null
+        shellWalletArea.isEnabled = !isBusy && ethereumWallet != null
+        shellCopyWalletButton.isEnabled = !isBusy && ethereumWallet != null
         copySignatureButton.isEnabled = !isBusy && gateBSignature != null
         if (::issuerConfirmation.isInitialized) {
             val operation = ethereumWallet?.address?.let {
