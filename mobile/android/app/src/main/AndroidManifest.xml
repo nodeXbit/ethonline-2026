@@ -11,6 +11,7 @@
         android:name=".GateBApplication"
         android:allowBackup="false"
         android:label="@string/app_name"
+        android:theme="@style/Theme.EnsAccess"
         android:supportsRtl="true">
         <activity
             android:name=".MainActivity"

@@ -2,21 +2,32 @@ package io.github.nodexbit.ethonline2026
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.content.res.Configuration
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.util.Log
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.math.BigInteger
 import io.privy.auth.PrivyUser
 import io.privy.wallet.ethereum.EmbeddedEthereumWallet
 import io.privy.wallet.ethereum.EthereumChain
@@ -54,11 +65,67 @@ class MainActivity : Activity() {
     private lateinit var m1Button: Button
     private lateinit var m1RearmButton: Button
     private lateinit var m1ExplorerButton: Button
+    private lateinit var productStatusText: TextView
+    private lateinit var myKeysText: TextView
+    private lateinit var importCredentialInput: EditText
+    private lateinit var issuerProductSection: LinearLayout
+    private lateinit var artworkInput: EditText
+    private lateinit var createReviewButton: Button
+    private lateinit var resumeSetupButton: Button
+    private lateinit var copyCredentialButton: Button
+    private lateinit var loggedOutView: LinearLayout
+    private lateinit var authenticatedView: LinearLayout
+    private lateinit var navigationBar: LinearLayout
+    private lateinit var productScrollView: ScrollView
+    private lateinit var myKeysSection: LinearLayout
+    private lateinit var myKeysCards: LinearLayout
+    private lateinit var myKeysEmptyCard: LinearLayout
+    private lateinit var myKeysActions: LinearLayout
+    private lateinit var settingsSection: LinearLayout
+    private lateinit var diagnosticsSection: LinearLayout
+    private lateinit var actionFailureText: TextView
+    private lateinit var shellIdentityText: TextView
+    private lateinit var settingsIdentityText: TextView
+    private lateinit var shellFeedbackText: TextView
+    private lateinit var loginFeedbackText: TextView
+    private lateinit var myKeysNavButton: Button
+    private lateinit var issuerNavButton: Button
+    private lateinit var settingsNavButton: Button
+    private var currentDestination = ProductDestination.MY_KEYS
+    private var issuerCapabilityConfirmed = false
+    private var lastActionFailure: SafeActionFailure? = null
     private var currentUser: PrivyUser? = null
     private var ethereumWallet: EmbeddedEthereumWallet? = null
     private var gateBSignature: String? = null
     private var m1Runner: MobileIssuerAdmissionRunner? = null
     private var m1OperationId: String? = null
+    private var contractRunner: ContractTransactionRunner? = null
+    private val credentialRpcClient by lazy { ReadOnlyEthereumRpcClient() }
+    private val credentialReader by lazy { CredentialReader(credentialRpcClient) }
+    private val credentialFinalReadback by lazy {
+        CredentialFinalReadbackReconciler(read = { fullName -> credentialReader.read(fullName) })
+    }
+    private val credentialTransactionEngine by lazy {
+        val preferences = getSharedPreferences(CREDENTIAL_PREFERENCES, MODE_PRIVATE)
+        RecoverableTransactionEngine(
+            TransactionJournal(
+                object : TransactionJournalStore {
+                    override fun load(): String? = preferences.getString(CREDENTIAL_TRANSACTION_JOURNAL, null)
+                    override fun save(serializedJournal: String) {
+                        check(preferences.edit().putString(CREDENTIAL_TRANSACTION_JOURNAL, serializedJournal).commit()) {
+                            "Credential transaction journal persistence failed"
+                        }
+                    }
+                },
+            ),
+        )
+    }
+    private val issuanceCoordinator by lazy {
+        sharedStringStore(CREDENTIAL_ISSUANCE_JOURNAL).let(::IssuanceCoordinator)
+    }
+    private val credentialIndex by lazy {
+        sharedStringStore(CREDENTIAL_LOCAL_INDEX).let(::LocalCredentialIndex)
+    }
     private val m1ReadinessGate = MobileIssuerReadinessGate()
     private var m1ReadinessJob: Job? = null
     private val m1TransactionEngine by lazy {
@@ -83,6 +150,8 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.statusBarColor = pageColor()
+        window.navigationBarColor = pageColor()
         setContentView(buildContentView())
 
         if (!gateBApplication.isPrivyConfigured) {
@@ -101,6 +170,7 @@ class MainActivity : Activity() {
                 showHceSignerStatus("LOGIN REQUIRED")
                 showStatus("Ready for email login.")
             } else {
+                showAuthenticatedShell()
                 showStatus("Existing authenticated session restored.")
                 reuseExistingWallet()
             }
@@ -113,118 +183,766 @@ class MainActivity : Activity() {
     }
 
     private fun buildContentView(): ScrollView {
-        val padding = (20 * resources.displayMetrics.density).toInt()
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(padding, padding, padding, padding)
+            setPadding(
+                dp(ProductSpacing.CONTENT_GUTTER_DP),
+                dp(ProductSpacing.TOP_GUTTER_DP),
+                dp(ProductSpacing.CONTENT_GUTTER_DP),
+                dp(ProductSpacing.BOTTOM_GUTTER_DP),
+            )
         }
 
-        fun label(value: String) = TextView(this).apply {
-            text = value
-            textSize = 16f
-            setPadding(0, padding / 2, 0, padding / 4)
+        loggedOutView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
         }
-
-        fun button(value: String, onClick: () -> Unit) = Button(this).apply {
-            text = value
-            setOnClickListener { onClick() }
-        }
-
-        content.addView(label("ENSv2 Access Demo\nGate B — Privy holder signing").apply {
-            textSize = 21f
-        })
-
-        emailInput = EditText(this).apply {
-            hint = "Email address"
+        loggedOutView.addView(productTitle("ENS Access"), matchWrapParams())
+        loggedOutView.addView(productBody("Programmable credentials powered by ENS").apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(4), 0, dp(28))
+        }, matchWrapParams())
+        val signInCard = productCard()
+        signInCard.addView(productHeading("Sign in"), matchWrapParams())
+        signInCard.addView(productCaption("EMAIL"), matchWrapParams())
+        emailInput = productInput("you@example.com").apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
         }
-        content.addView(emailInput, matchWrapParams())
-        val sendCodeButton = button("Send code", ::sendCode)
-        content.addView(sendCodeButton, matchWrapParams())
-
-        otpInput = EditText(this).apply {
-            hint = "OTP code"
+        signInCard.addView(emailInput, matchWrapParams())
+        val sendCodeButton = productButton("Send code", primary = false, action = ::sendCode)
+        signInCard.addView(sendCodeButton, matchWrapParams())
+        signInCard.addView(productCaption("VERIFICATION CODE").apply { setPadding(0, dp(18), 0, 0) }, matchWrapParams())
+        otpInput = productInput("6-digit code").apply {
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
         }
-        content.addView(otpInput, matchWrapParams())
-        val loginButton = button("Log in", ::logIn)
-        content.addView(loginButton, matchWrapParams())
+        signInCard.addView(otpInput, matchWrapParams())
+        val loginButton = productButton("Sign in", action = ::logIn)
+        signInCard.addView(loginButton, matchWrapParams())
+        loggedOutView.addView(signInCard, cardParams())
+        loginFeedbackText = productBody("Enter your email to receive a secure sign-in code.").apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(18), dp(12), 0)
+        }
+        loggedOutView.addView(loginFeedbackText, matchWrapParams())
+        content.addView(loggedOutView, matchWrapParams())
 
-        val walletButton = button("Create/reuse Ethereum wallet", ::createOrReuseWallet)
-        content.addView(walletButton, matchWrapParams())
-        walletText = label("PRIVY WALLET:\nNot available").apply {
+        authenticatedView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val top = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        brand.addView(productTitle("ENS Access"), matchWrapParams())
+        shellIdentityText = accountChip("Wallet not ready")
+        brand.addView(shellIdentityText, ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ))
+        top.addView(brand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginEnd = dp(12)
+        })
+        top.addView(statusChip("Sepolia", positive = true), ViewGroup.LayoutParams(dp(92), dp(36)))
+        authenticatedView.addView(top, matchWrapParams())
+
+        navigationBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(20), 0, dp(18))
+        }
+        myKeysNavButton = navigationButton("My Keys") { showDestination(ProductDestination.MY_KEYS) }
+        issuerNavButton = navigationButton("Issuer") { showDestination(ProductDestination.ISSUER) }.apply {
+            visibility = View.GONE
+        }
+        settingsNavButton = navigationButton("Settings") { showDestination(ProductDestination.SETTINGS) }
+        navigationBar.addView(myKeysNavButton, weightedParams())
+        navigationBar.addView(issuerNavButton, weightedParams())
+        navigationBar.addView(settingsNavButton, weightedParams())
+        authenticatedView.addView(navigationBar, matchWrapParams())
+
+        shellFeedbackText = productBody("").apply {
+            visibility = View.GONE
+            background = roundedBackground(surfaceMutedColor(), dp(14).toFloat())
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        authenticatedView.addView(shellFeedbackText, cardParams())
+
+        myKeysSection = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        myKeysSection.addView(sectionHeader("MY KEYS", "Your digital access cards."), matchWrapParams())
+        myKeysEmptyCard = productCard().apply { gravity = Gravity.CENTER_HORIZONTAL }
+        myKeysEmptyCard.addView(emptyCredentialVisual(), LinearLayout.LayoutParams(dp(72), dp(72)).apply {
+            bottomMargin = dp(18)
+        })
+        myKeysText = productHeading("No credentials yet").apply { gravity = Gravity.CENTER }
+        myKeysEmptyCard.addView(myKeysText, matchWrapParams())
+        myKeysEmptyCard.addView(productBody("Credentials you receive or import will appear here.").apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(14))
+        }, matchWrapParams())
+        importCredentialInput = productInput("credential.keys.demo-access.eth")
+        val importButton = productButton("Import credential", action = ::showImportCredentialDialog)
+        myKeysEmptyCard.addView(importButton, matchWrapParams())
+        myKeysSection.addView(myKeysEmptyCard, cardParams())
+        myKeysCards = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        myKeysSection.addView(myKeysCards, matchWrapParams())
+        myKeysActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            visibility = View.GONE
+        }
+        val importAnotherButton = productButton("Import another", primary = false, action = ::showImportCredentialDialog)
+        val refreshKeysButton = productButton("Refresh onchain", primary = false, action = ::refreshMyKeys)
+        myKeysActions.addView(importAnotherButton, weightedParams())
+        myKeysActions.addView(refreshKeysButton, weightedParams())
+        myKeysSection.addView(myKeysActions, actionParams())
+        authenticatedView.addView(myKeysSection, matchWrapParams())
+
+        issuerProductSection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        issuerProductSection.addView(sectionHeader("NEW CREDENTIAL", "Create a verified digital key for staff access."), matchWrapParams())
+        issuerProductSection.addView(detailCard("CREDENTIAL IDENTITY", listOf(
+            "Name" to "Staff access",
+            "ENS name" to IssuerSpace.fullName,
+        )), cardParams())
+        issuerProductSection.addView(detailCard("RECIPIENT", listOf(
+            "Wallet" to ProductShellPolicy.compactAddress(IssuerSpace.STAFF_HOLDER),
+        )), cardParams())
+        issuerProductSection.addView(detailCard("ACCESS POLICY", listOf(
+            "Expires" to "31 Oct 2026, 23:59",
+            "Transferability" to "Non-transferable",
+            "Initial access" to "Allowed",
+        )), cardParams())
+        val presentationCard = productCard()
+        presentationCard.addView(productCaption("PRESENTATION"), matchWrapParams())
+        presentationCard.addView(productBody("Artwork URI · optional"), matchWrapParams())
+        artworkInput = productInput("https:// or ipfs://").apply {
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        }
+        presentationCard.addView(artworkInput, matchWrapParams())
+        presentationCard.addView(valueRow("Description", IssuerSpace.DEFAULT_DESCRIPTION), matchWrapParams())
+        issuerProductSection.addView(presentationCard, cardParams())
+        createReviewButton = productButton("Review credential", action = ::reviewCredential)
+        issuerProductSection.addView(createReviewButton, actionParams())
+        resumeSetupButton = productButton("Resume setup", action = ::resumeIssuance).apply { visibility = View.GONE }
+        issuerProductSection.addView(resumeSetupButton, actionParams())
+        copyCredentialButton = productButton("Copy credential name", primary = false, action = ::copyCredentialName).apply {
+            visibility = View.GONE
+        }
+        issuerProductSection.addView(copyCredentialButton, actionParams())
+        productStatusText = productBody("").apply {
+            visibility = View.GONE
+            setTextColor(textPrimaryColor())
+            setTypeface(typeface, Typeface.BOLD)
+            background = roundedBackground(surfaceMutedColor(), dp(14).toFloat())
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+        }
+        issuerProductSection.addView(productStatusText, cardParams())
+        authenticatedView.addView(issuerProductSection, matchWrapParams())
+
+        settingsSection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        settingsSection.addView(sectionHeader("SETTINGS", "Account, network, and developer tools."), matchWrapParams())
+        val accountCard = productCard()
+        accountCard.addView(productCaption("ACCOUNT"), matchWrapParams())
+        accountCard.addView(productCaption("ACTIVE ACCOUNT"), matchWrapParams())
+        settingsIdentityText = productBody("Wallet not ready").apply {
+            setTextColor(textPrimaryColor())
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(12))
+        }
+        accountCard.addView(settingsIdentityText, matchWrapParams())
+        walletText = productBody("Current wallet\nNot available").apply {
+            textSize = 14f
+            setTypeface(Typeface.MONOSPACE)
             setTextIsSelectable(true)
         }
-        content.addView(walletText, matchWrapParams())
-        copyWalletButton = button("Copy wallet address", ::copyWalletAddress).apply {
+        accountCard.addView(walletText, matchWrapParams())
+        copyWalletButton = productButton("Copy full address", primary = false, action = ::copyWalletAddress).apply {
             isEnabled = false
         }
-        content.addView(copyWalletButton, matchWrapParams())
-        hceSignerText = label("HCE SIGNER:\nLOGIN REQUIRED")
-        content.addView(hceSignerText, matchWrapParams())
+        accountCard.addView(copyWalletButton, matchWrapParams())
+        val walletButton = productButton("Create or reuse wallet", primary = false, action = ::createOrReuseWallet)
+        accountCard.addView(walletButton, matchWrapParams())
+        val logoutButton = productButton("Switch account / Log out", primary = false, action = ::logout)
+        accountCard.addView(logoutButton, matchWrapParams())
+        settingsSection.addView(accountCard, cardParams())
+        settingsSection.addView(detailCard("NETWORK", listOf("Selected network" to "Sepolia")), cardParams())
+        val developerCard = productCard()
+        developerCard.addView(productCaption("DEVELOPER OPTIONS"), matchWrapParams())
+        developerCard.addView(productBody("Admission, signing, HCE, and transaction diagnostics."), matchWrapParams())
+        developerCard.addView(productButton("Developer diagnostics", primary = false) {
+            showDestination(ProductDestination.DIAGNOSTICS)
+        }, matchWrapParams())
+        settingsSection.addView(developerCard, cardParams())
+        authenticatedView.addView(settingsSection, matchWrapParams())
 
-        val signButton = button("Sign Gate B challenge", ::signGateBChallenge)
-        content.addView(signButton, matchWrapParams())
-        val hceTestButton = button("Run Gate C2 HCE signing test", ::runGateC2HceTest)
-        content.addView(hceTestButton, matchWrapParams())
-        hceResultText = label("GATE C2 HCE TEST:\nNot run")
-        content.addView(hceResultText, matchWrapParams())
-        signatureText = label("SIGNATURE:\nNot available").apply {
-            setTextIsSelectable(true)
+        diagnosticsSection = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
         }
-        content.addView(signatureText, matchWrapParams())
-        copySignatureButton = button("Copy signature", ::copySignature).apply {
-            isEnabled = false
-        }
-        content.addView(copySignatureButton, matchWrapParams())
-
-        content.addView(label("MOBILE ISSUER ADMISSION").apply { textSize = 21f })
-        m1WalletText = label("CURRENT WALLET:\nNot available").apply { setTextIsSelectable(true) }
-        content.addView(m1WalletText, matchWrapParams())
-        m1NetworkText = label("NETWORK:\nNot verified")
-        content.addView(m1NetworkText, matchWrapParams())
-        m1BalanceText = label("BALANCE:\nNot available")
-        content.addView(m1BalanceText, matchWrapParams())
-        m1StatusText = label("STATUS:\nBLOCKED - dedicated issuer wallet required")
-        content.addView(m1StatusText, matchWrapParams())
+        diagnosticsSection.addView(productButton("← Back to Settings", primary = false) {
+            showDestination(ProductDestination.SETTINGS)
+        }, matchWrapParams())
+        diagnosticsSection.addView(sectionHeader("DEVELOPER DIAGNOSTICS", "Technical test surfaces. Not required for normal product use."), matchWrapParams())
+        actionFailureText = diagnosticLabel("LAST ACTION FAILURE\nNone")
+        diagnosticsSection.addView(actionFailureText, matchWrapParams())
+        hceSignerText = diagnosticLabel("HCE SIGNER:\nLOGIN REQUIRED")
+        diagnosticsSection.addView(hceSignerText, matchWrapParams())
+        val signButton = diagnosticButton("Sign Gate B challenge", ::signGateBChallenge)
+        diagnosticsSection.addView(signButton, matchWrapParams())
+        val hceTestButton = diagnosticButton("Run Gate C2 HCE signing test", ::runGateC2HceTest)
+        diagnosticsSection.addView(hceTestButton, matchWrapParams())
+        hceResultText = diagnosticLabel("GATE C2 HCE TEST:\nNot run")
+        diagnosticsSection.addView(hceResultText, matchWrapParams())
+        signatureText = diagnosticLabel("SIGNATURE:\nNot available").apply { setTextIsSelectable(true) }
+        diagnosticsSection.addView(signatureText, matchWrapParams())
+        copySignatureButton = diagnosticButton("Copy signature", ::copySignature).apply { isEnabled = false }
+        diagnosticsSection.addView(copySignatureButton, matchWrapParams())
+        diagnosticsSection.addView(diagnosticLabel("MOBILE ISSUER ADMISSION").apply {
+            textSize = 20f
+            setTypeface(typeface, Typeface.BOLD)
+        }, matchWrapParams())
+        m1WalletText = diagnosticLabel("CURRENT WALLET:\nNot available").apply { setTextIsSelectable(true) }
+        diagnosticsSection.addView(m1WalletText, matchWrapParams())
+        m1NetworkText = diagnosticLabel("NETWORK:\nNot verified")
+        diagnosticsSection.addView(m1NetworkText, matchWrapParams())
+        m1BalanceText = diagnosticLabel("BALANCE:\nNot available")
+        diagnosticsSection.addView(m1BalanceText, matchWrapParams())
+        m1StatusText = diagnosticLabel("STATUS:\nBLOCKED - dedicated issuer wallet required")
+        diagnosticsSection.addView(m1StatusText, matchWrapParams())
         issuerConfirmation = CheckBox(this).apply {
             text = "I confirm this separate login is the new dedicated issuer account"
             isEnabled = false
-            setOnCheckedChangeListener { _, checked ->
-                onIssuerConfirmationChanged(checked)
-            }
+            setOnCheckedChangeListener { _, checked -> onIssuerConfirmationChanged(checked) }
         }
-        content.addView(issuerConfirmation, matchWrapParams())
-        m1Button = button("RUN ZERO-VALUE SEPOLIA ADMISSION", ::confirmMobileIssuerAdmission).apply {
+        diagnosticsSection.addView(issuerConfirmation, matchWrapParams())
+        m1Button = diagnosticButton("RUN ZERO-VALUE SEPOLIA ADMISSION", ::confirmMobileIssuerAdmission).apply {
             isEnabled = false
         }
-        content.addView(m1Button, matchWrapParams())
-        m1RearmButton = button("RE-ARM ADMISSION", ::rearmMobileIssuerAdmission).apply {
+        diagnosticsSection.addView(m1Button, matchWrapParams())
+        m1RearmButton = diagnosticButton("RE-ARM ADMISSION", ::rearmMobileIssuerAdmission).apply {
             visibility = View.GONE
         }
-        content.addView(m1RearmButton, matchWrapParams())
-        m1ExplorerButton = button("VIEW TRANSACTION IN EXPLORER", ::openM1TransactionExplorer).apply {
+        diagnosticsSection.addView(m1RearmButton, matchWrapParams())
+        m1ExplorerButton = diagnosticButton("VIEW TRANSACTION IN EXPLORER", ::openM1TransactionExplorer).apply {
             visibility = View.GONE
         }
-        content.addView(m1ExplorerButton, matchWrapParams())
+        diagnosticsSection.addView(m1ExplorerButton, matchWrapParams())
+        statusText = diagnosticLabel("Initializing…")
+        diagnosticsSection.addView(statusText, matchWrapParams())
+        authenticatedView.addView(diagnosticsSection, matchWrapParams())
 
-        statusText = label("Initializing…")
-        content.addView(statusText, matchWrapParams())
+        content.addView(authenticatedView, matchWrapParams())
         operationButtons = listOf(
-            sendCodeButton,
-            loginButton,
-            walletButton,
-            signButton,
-            hceTestButton,
+            sendCodeButton, loginButton, walletButton, logoutButton, importButton, importAnotherButton,
+            refreshKeysButton, signButton, hceTestButton,
         )
-
-        return ScrollView(this).apply { addView(content) }
+        showLoggedOutShell()
+        productScrollView = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(pageColor())
+            addView(content)
+            setOnApplyWindowInsetsListener { _, insets ->
+                val systemLeft: Int
+                val systemTop: Int
+                val systemRight: Int
+                val systemBottom: Int
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val bars = insets.getInsets(
+                        WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
+                    )
+                    systemLeft = bars.left
+                    systemTop = bars.top
+                    systemRight = bars.right
+                    systemBottom = bars.bottom
+                } else {
+                    systemLeft = insets.systemWindowInsetLeft
+                    systemTop = insets.systemWindowInsetTop
+                    systemRight = insets.systemWindowInsetRight
+                    systemBottom = insets.systemWindowInsetBottom
+                }
+                val contentPadding = ProductSpacing.contentPadding(resources.displayMetrics.density)
+                content.setPadding(
+                    contentPadding.left,
+                    contentPadding.top,
+                    contentPadding.right,
+                    contentPadding.bottom,
+                )
+                val viewportPadding = ProductSpacing.viewportPadding(
+                    systemLeft,
+                    systemTop,
+                    systemRight,
+                    systemBottom,
+                )
+                setPadding(
+                    viewportPadding.left,
+                    viewportPadding.top,
+                    viewportPadding.right,
+                    viewportPadding.bottom,
+                )
+                clipToPadding = true
+                insets
+            }
+            requestApplyInsets()
+        }
+        return productScrollView
     }
 
     private fun matchWrapParams() = ViewGroup.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.WRAP_CONTENT,
     )
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun isDarkMode(): Boolean =
+        resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+
+    private fun pageColor(): Int = Color.parseColor(if (isDarkMode()) "#121117" else "#F7F6FA")
+    private fun surfaceColor(): Int = Color.parseColor(if (isDarkMode()) "#1E1C25" else "#FFFFFF")
+    private fun surfaceMutedColor(): Int = Color.parseColor(if (isDarkMode()) "#2A2733" else "#EFEDF5")
+    private fun textPrimaryColor(): Int = Color.parseColor(if (isDarkMode()) "#F6F3FA" else "#1B1722")
+    private fun textSecondaryColor(): Int = Color.parseColor(if (isDarkMode()) "#BDB6C8" else "#6F6878")
+    private fun accentColor(): Int = Color.parseColor(if (isDarkMode()) "#A993FF" else "#5B3FD3")
+    private fun successColor(): Int = Color.parseColor(if (isDarkMode()) "#65D99B" else "#16794D")
+    private fun borderColor(): Int = Color.parseColor(if (isDarkMode()) "#3A3644" else "#E2DFE8")
+
+    private fun roundedBackground(
+        color: Int,
+        radius: Float,
+        strokeColor: Int? = null,
+    ): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = radius
+        setColor(color)
+        strokeColor?.let { setStroke(dp(1), it) }
+    }
+
+    private fun productTitle(value: String) = TextView(this).apply {
+        text = value
+        textSize = 28f
+        setTextColor(textPrimaryColor())
+        setTypeface(typeface, Typeface.BOLD)
+    }
+
+    private fun productHeading(value: String) = TextView(this).apply {
+        text = value
+        textSize = 19f
+        setTextColor(textPrimaryColor())
+        setTypeface(typeface, Typeface.BOLD)
+        setLineSpacing(dp(2).toFloat(), 1f)
+    }
+
+    private fun productBody(value: String) = TextView(this).apply {
+        text = value
+        textSize = 15f
+        setTextColor(textSecondaryColor())
+        setLineSpacing(dp(3).toFloat(), 1f)
+    }
+
+    private fun productCaption(value: String) = TextView(this).apply {
+        text = value
+        textSize = 12f
+        letterSpacing = 0.08f
+        setTextColor(textSecondaryColor())
+        setTypeface(typeface, Typeface.BOLD)
+        setPadding(0, 0, 0, dp(6))
+    }
+
+    private fun productCard() = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(18), dp(18), dp(18), dp(18))
+        background = roundedBackground(surfaceColor(), dp(18).toFloat(), borderColor())
+        elevation = dp(2).toFloat()
+    }
+
+    private fun cardParams() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+    ).apply { bottomMargin = dp(ProductSpacing.CARD_GAP_DP) }
+
+    private fun actionParams() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+    ).apply {
+        topMargin = dp(4)
+        bottomMargin = dp(12)
+    }
+
+    private fun weightedParams() = LinearLayout.LayoutParams(0, dp(ProductSpacing.CONTROL_HEIGHT_DP), 1f).apply {
+        marginStart = dp(3)
+        marginEnd = dp(3)
+    }
+
+    private fun fullWidthControlParams(minimumHeightDp: Int) = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        dp(minimumHeightDp),
+    )
+
+    private fun productInput(hintValue: String) = EditText(this).apply {
+        hint = hintValue
+        textSize = 16f
+        setTextColor(textPrimaryColor())
+        setHintTextColor(textSecondaryColor())
+        minHeight = dp(52)
+        setSingleLine(false)
+        maxLines = 2
+        backgroundTintList = ColorStateList.valueOf(accentColor())
+        setPadding(dp(4), dp(8), dp(4), dp(8))
+    }
+
+    private fun productButton(textValue: String, primary: Boolean = true, action: () -> Unit) = Button(this).apply {
+        text = textValue
+        isAllCaps = false
+        textSize = 15f
+        minHeight = dp(ProductSpacing.CONTROL_HEIGHT_DP)
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(if (primary) Color.WHITE else textPrimaryColor())
+        backgroundTintList = ColorStateList.valueOf(if (primary) accentColor() else surfaceMutedColor())
+        setOnClickListener { action() }
+    }
+
+    private fun navigationButton(textValue: String, action: () -> Unit) = Button(this).apply {
+        text = textValue
+        isAllCaps = false
+        textSize = 13f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(textPrimaryColor())
+        backgroundTintList = ColorStateList.valueOf(surfaceMutedColor())
+        setOnClickListener { action() }
+    }
+
+    private fun statusChip(textValue: String, positive: Boolean) = TextView(this).apply {
+        text = textValue
+        gravity = Gravity.CENTER
+        textSize = 13f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(if (positive) successColor() else textSecondaryColor())
+        background = roundedBackground(surfaceMutedColor(), dp(18).toFloat(), borderColor())
+    }
+
+    private fun accountChip(textValue: String) = productBody(textValue).apply {
+        textSize = 13f
+        setTextColor(textPrimaryColor())
+        setTypeface(typeface, Typeface.BOLD)
+        background = roundedBackground(surfaceMutedColor(), dp(14).toFloat(), borderColor())
+        setPadding(dp(10), dp(5), dp(10), dp(5))
+        maxLines = 1
+    }
+
+    private fun emptyCredentialVisual() = TextView(this).apply {
+        text = "KEY"
+        gravity = Gravity.CENTER
+        textSize = 16f
+        letterSpacing = 0.08f
+        setTypeface(typeface, Typeface.BOLD)
+        setTextColor(Color.WHITE)
+        background = roundedBackground(accentColor(), dp(20).toFloat())
+        contentDescription = "Digital credential placeholder"
+    }
+
+    private fun sectionHeader(label: String, description: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        addView(productCaption(label), matchWrapParams())
+        addView(productBody(description), matchWrapParams())
+        setPadding(dp(2), 0, dp(2), dp(14))
+    }
+
+    private fun detailCard(title: String, values: List<Pair<String, String>>) = productCard().apply {
+        addView(productCaption(title), matchWrapParams())
+        values.forEach { (label, value) -> addView(valueRow(label, value), matchWrapParams()) }
+    }
+
+    private fun valueRow(label: String, value: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(0, dp(6), 0, dp(8))
+        addView(productCaption(label.uppercase()), matchWrapParams())
+        addView(productBody(value).apply {
+            setTextColor(textPrimaryColor())
+            setTextIsSelectable(value.startsWith("0x"))
+        }, matchWrapParams())
+    }
+
+    private fun diagnosticLabel(value: String) = TextView(this).apply {
+        text = value
+        textSize = 14f
+        setTextColor(textPrimaryColor())
+        setPadding(dp(8), dp(10), dp(8), dp(10))
+    }
+
+    private fun diagnosticButton(textValue: String, action: () -> Unit) =
+        productButton(textValue, primary = false, action = action)
+
+    private fun showLoggedOutShell() {
+        loggedOutView.visibility = View.VISIBLE
+        authenticatedView.visibility = View.GONE
+        currentDestination = ProductDestination.MY_KEYS
+        resetProductScroll()
+    }
+
+    private fun showAuthenticatedShell() {
+        loggedOutView.visibility = View.GONE
+        authenticatedView.visibility = View.VISIBLE
+        showDestination(ProductDestination.MY_KEYS)
+    }
+
+    private fun showDestination(destination: ProductDestination) {
+        if (destination == ProductDestination.ISSUER && !issuerCapabilityConfirmed) return
+        currentDestination = destination
+        navigationBar.visibility = if (destination == ProductDestination.DIAGNOSTICS) View.GONE else View.VISIBLE
+        myKeysSection.visibility = if (destination == ProductDestination.MY_KEYS) View.VISIBLE else View.GONE
+        issuerProductSection.visibility = if (destination == ProductDestination.ISSUER) View.VISIBLE else View.GONE
+        settingsSection.visibility = if (destination == ProductDestination.SETTINGS) View.VISIBLE else View.GONE
+        diagnosticsSection.visibility = if (destination == ProductDestination.DIAGNOSTICS) View.VISIBLE else View.GONE
+        shellFeedbackText.visibility = View.GONE
+        resetProductScroll()
+        if (destination != ProductDestination.DIAGNOSTICS) {
+            val selected = accentColor()
+            val idle = surfaceMutedColor()
+            myKeysNavButton.backgroundTintList = ColorStateList.valueOf(
+                if (destination == ProductDestination.MY_KEYS) selected else idle,
+            )
+            issuerNavButton.backgroundTintList = ColorStateList.valueOf(
+                if (destination == ProductDestination.ISSUER) selected else idle,
+            )
+            settingsNavButton.backgroundTintList = ColorStateList.valueOf(
+                if (destination == ProductDestination.SETTINGS) selected else idle,
+            )
+            myKeysNavButton.setTextColor(if (destination == ProductDestination.MY_KEYS) Color.WHITE else textPrimaryColor())
+            issuerNavButton.setTextColor(if (destination == ProductDestination.ISSUER) Color.WHITE else textPrimaryColor())
+            settingsNavButton.setTextColor(if (destination == ProductDestination.SETTINGS) Color.WHITE else textPrimaryColor())
+        }
+    }
+
+    private fun resetProductScroll() {
+        if (::productScrollView.isInitialized) {
+            productScrollView.post { productScrollView.scrollTo(0, 0) }
+        }
+    }
+
+    private fun showImportCredentialDialog() {
+        val input = productInput("credential.keys.demo-access.eth").apply {
+            setSingleLine(true)
+            setText(importCredentialInput.text)
+        }
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(4), dp(20), 0)
+            addView(productBody("Enter the full ENS credential name. Ownership will be verified onchain."), matchWrapParams())
+            addView(input, matchWrapParams())
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Import credential")
+            .setView(container)
+            .setNegativeButton("Back", null)
+            .setPositiveButton("Verify & import") { _, _ ->
+                importCredentialInput.setText(input.text)
+                importCredential()
+            }
+            .show()
+    }
+
+    private fun credentialCard(
+        fullName: String,
+        access: String,
+        transferable: String,
+        description: String,
+        artwork: String,
+    ) = productCard().apply {
+        val header = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val placeholder = TextView(this@MainActivity).apply {
+            text = "SA"
+            gravity = Gravity.CENTER
+            textSize = 20f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            background = roundedBackground(accentColor(), dp(16).toFloat())
+            contentDescription = if (artwork.isBlank()) "Staff access artwork placeholder" else "Staff access artwork"
+        }
+        header.addView(placeholder, LinearLayout.LayoutParams(dp(66), dp(66)).apply { marginEnd = dp(14) })
+        val identity = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+        identity.addView(productCaption("STAFF ACCESS"), matchWrapParams())
+        identity.addView(productHeading(fullName).apply {
+            textSize = 17f
+            maxLines = 2
+        }, matchWrapParams())
+        header.addView(identity, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        addView(header, matchWrapParams())
+        addView(statusChip(access.uppercase(), positive = access == "Allowed"), LinearLayout.LayoutParams(dp(116), dp(36)).apply {
+            topMargin = dp(16)
+            bottomMargin = dp(10)
+        })
+        addView(valueRow("Valid until", "31 Oct 2026"), matchWrapParams())
+        addView(productBody(transferable).apply {
+            setTextColor(textPrimaryColor())
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(2), 0, dp(12))
+        }, matchWrapParams())
+        addView(valueRow("Description", description), matchWrapParams())
+        if (artwork.isNotBlank()) {
+            addView(productCaption("ARTWORK LINKED"), matchWrapParams())
+        }
+    }
+
+    private fun reviewPreviewCard(review: StaffReviewPresentation) = productCard().apply {
+        val header = LinearLayout(this@MainActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        header.addView(TextView(this@MainActivity).apply {
+            text = "SA"
+            gravity = Gravity.CENTER
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, Typeface.BOLD)
+            background = roundedBackground(accentColor(), dp(14).toFloat())
+            contentDescription = "Staff access artwork placeholder"
+        }, LinearLayout.LayoutParams(dp(56), dp(56)).apply { marginEnd = dp(14) })
+        header.addView(productCaption("STAFF ACCESS"), LinearLayout.LayoutParams(
+            0,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            1f,
+        ))
+        header.addView(statusChip(review.access.uppercase(), positive = true), LinearLayout.LayoutParams(dp(110), dp(34)))
+        addView(header, matchWrapParams())
+        addView(productHeading(review.credential).apply {
+            textSize = 16f
+            maxLines = 2
+            setPadding(0, dp(12), 0, 0)
+        }, matchWrapParams())
+    }
+
+    private fun reviewRow(label: String, value: String) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = dp(48)
+        addView(productCaption(label.uppercase()), LinearLayout.LayoutParams(dp(112), ViewGroup.LayoutParams.WRAP_CONTENT))
+        addView(productBody(value).apply {
+            setTextColor(textPrimaryColor())
+            gravity = Gravity.END
+            maxLines = 2
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    }
+
+    private fun exactReviewField(label: String, value: String, monospace: Boolean = false) =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(5), 0, dp(7))
+            addView(productCaption(label.uppercase()), matchWrapParams())
+            addView(productBody(value).apply {
+                setTextColor(textPrimaryColor())
+                setTextIsSelectable(true)
+                if (monospace) setTypeface(Typeface.MONOSPACE)
+            }, matchWrapParams())
+        }
+
+    private fun exactReviewDetails(review: StaffReviewPresentation) = productCard().apply {
+        addView(productCaption("EXACT TRANSACTION DETAILS"), matchWrapParams())
+        addView(exactReviewField("Credential", review.credential), matchWrapParams())
+        addView(exactReviewField("Recipient", review.exactRecipient, monospace = true), matchWrapParams())
+        addView(exactReviewField("Issuing wallet", review.issuingWallet, monospace = true), matchWrapParams())
+        addView(exactReviewField("Access", review.access), matchWrapParams())
+        addView(exactReviewField("Expiry", review.exactExpiry), matchWrapParams())
+        addView(exactReviewField("UTC", review.utcExpiry, monospace = true), matchWrapParams())
+        addView(exactReviewField("Transferability", review.transferability), matchWrapParams())
+        addView(exactReviewField("Network", review.network), matchWrapParams())
+    }
+
+    private fun showCredentialReview(
+        reviewDraft: CredentialReviewDraft,
+        recordsOnly: Boolean,
+        configurationCalldata: String? = null,
+    ) {
+        val review = reviewDraft.presentation
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(20), dp(20), dp(16))
+            background = roundedBackground(surfaceColor(), dp(24).toFloat(), borderColor())
+            addView(productHeading(if (recordsOnly) "Configure credential" else "Review credential").apply {
+                textSize = 23f
+                setPadding(0, 0, 0, dp(14))
+            }, matchWrapParams())
+        }
+        val details = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            if (recordsOnly) addView(reviewRow("Existing credential", review.credential), matchWrapParams())
+            addView(reviewPreviewCard(review), cardParams())
+            addView(reviewRow("Recipient", if (recordsOnly) review.exactRecipient else review.recipient), matchWrapParams())
+            addView(reviewRow("Access", review.access), matchWrapParams())
+            addView(reviewRow(
+                "Valid until",
+                if (recordsOnly) review.exactExpiry else review.expires.replace(", ", " · "),
+            ), matchWrapParams())
+            addView(reviewRow("Transfer", review.transferability), matchWrapParams())
+            addView(reviewRow("Description", review.description), matchWrapParams())
+            addView(reviewRow("Artwork", review.artwork), matchWrapParams())
+            addView(reviewRow("Network", review.network), matchWrapParams())
+            val exactDetails = exactReviewDetails(review).apply { visibility = View.GONE }
+            lateinit var exactToggle: Button
+            exactToggle = productButton("Show exact details", primary = false) {
+                val expanding = exactDetails.visibility != View.VISIBLE
+                exactDetails.visibility = if (expanding) View.VISIBLE else View.GONE
+                exactToggle.text = if (expanding) "Hide exact details" else "Show exact details"
+            }
+            addView(exactToggle, actionParams())
+            addView(exactDetails, cardParams())
+            addView(productBody(
+                if (recordsOnly) {
+                    "The credential is already created. This does not register it again.\n\n" +
+                        "Purpose: ${CredentialConfigurationPolicy.PURPOSE}"
+                } else {
+                    "Creation requires two Sepolia transactions:\n" +
+                        "1. ${review.transactionPurposes[0]}\n" +
+                        "2. ${review.transactionPurposes[1]}"
+                },
+            ).apply {
+                setTextColor(textPrimaryColor())
+                setPadding(dp(14), dp(12), dp(14), dp(12))
+                background = roundedBackground(surfaceMutedColor(), dp(14).toFloat())
+            }, cardParams())
+        }
+        panel.addView(ScrollView(this).apply { addView(details) }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            0,
+            1f,
+        ))
+        val dialog = Dialog(this)
+        val actionPlan = ReviewDialogPolicy.actionPlan(recordsOnly)
+        val actions = LinearLayout(this).apply {
+            orientation = if (actionPlan.stackedFullWidth) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        }
+        actions.addView(productButton(actionPlan.primaryLabel) {
+            dialog.dismiss()
+            if (recordsOnly) {
+                submitRecords(reviewDraft, checkNotNull(configurationCalldata))
+            } else {
+                submitRegister(reviewDraft)
+            }
+        }, fullWidthControlParams(actionPlan.minimumControlHeightDp))
+        actions.addView(productButton("Back", primary = false) { dialog.dismiss() },
+            fullWidthControlParams(actionPlan.minimumControlHeightDp).apply { topMargin = dp(6) })
+        panel.addView(actions, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+        ).apply { topMargin = dp(10) })
+        dialog.setContentView(panel)
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.show()
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setLayout(
+                (resources.displayMetrics.widthPixels * 0.92f).toInt(),
+                minOf((resources.displayMetrics.heightPixels * 0.86f).toInt(), dp(760)),
+            )
+        }
+    }
 
     private fun sendCode() {
         val email = emailInput.text.toString().trim()
@@ -252,11 +970,34 @@ class MainActivity : Activity() {
                 onSuccess = { user ->
                     otpInput.text.clear()
                     currentUser = user
+                    showAuthenticatedShell()
                     showStatus("Email authentication succeeded.")
                     reuseExistingWallet()
                 },
                 onFailure = { showSafeFailure("Email authentication", it) },
             )
+        }
+    }
+
+    private fun logout() {
+        runAction("Logging out…") {
+            gateBApplication.privy.logout()
+            currentUser = null
+            ethereumWallet = null
+            contractRunner = null
+            walletText.text = "Current wallet\nNot available"
+            settingsIdentityText.text = "Wallet not ready"
+            copyWalletButton.isEnabled = false
+            issuerCapabilityConfirmed = false
+            issuerNavButton.visibility = View.GONE
+            myKeysCards.removeAllViews()
+            myKeysEmptyCard.visibility = View.VISIBLE
+            myKeysActions.visibility = View.GONE
+            myKeysText.text = "No credentials yet"
+            showHceSignerStatus("LOGIN REQUIRED")
+            clearSignature()
+            showLoggedOutShell()
+            showStatus("Logged out. Sign in with the other account to continue.")
         }
     }
 
@@ -281,8 +1022,10 @@ class MainActivity : Activity() {
     }
 
     private fun reuseExistingWallet() {
+        showAuthenticatedShell()
         val existing = currentUser?.embeddedEthereumWallets?.firstOrNull()
         if (existing == null) {
+            shellIdentityText.text = "Account setup\nWallet not ready"
             showHceSignerStatus("CREATE WALLET FIRST")
             return
         }
@@ -291,11 +1034,25 @@ class MainActivity : Activity() {
 
     private fun selectWallet(wallet: EmbeddedEthereumWallet, status: String) {
         ethereumWallet = wallet
-        walletText.text = "PRIVY WALLET:\n${wallet.address}"
+        showAuthenticatedShell()
+        shellIdentityText.text = ProductShellPolicy.identityLabel(wallet.address, false)
+        settingsIdentityText.text = ProductShellPolicy.identityLabel(wallet.address, false)
+        walletText.text = "Current wallet\n${wallet.address}"
         copyWalletButton.isEnabled = true
         showHceSignerStatus("READY")
         clearSignature()
         resetMobileIssuerAdmission(wallet)
+        contractRunner = ContractTransactionRunner(
+            walletProvider = object : MobileIssuerWalletProvider {
+                override suspend fun switchToSepolia() = wallet.provider.switchChain(EthereumChain.Sepolia)
+                override suspend fun sendTransaction(transactionJson: String): String = wallet.provider.request(
+                    EthereumRpcRequest.ethSendTransaction(transactionJson),
+                ).getOrThrow().data
+            },
+            client = credentialRpcClient,
+            engine = credentialTransactionEngine,
+        )
+        refreshProduct(wallet.address)
         showStatus(status)
     }
 
@@ -352,6 +1109,440 @@ class MainActivity : Activity() {
             else -> blockMobileIssuer("KNOWN_HOLDER_BLOCKED")
         }
     }
+
+    private fun sharedStringStore(key: String): LoadableStringStateStore {
+        val preferences = getSharedPreferences(CREDENTIAL_PREFERENCES, MODE_PRIVATE)
+        return object : LoadableStringStateStore {
+            override fun load(): String? = preferences.getString(key, null)
+            override fun save(value: String) {
+                check(preferences.edit().putString(key, value).commit()) { "Credential state persistence failed" }
+            }
+        }
+    }
+
+    private fun refreshProduct(walletAddress: String) {
+        activityScope.launch {
+            val capability = credentialReader.issuerCapability(walletAddress)
+            if (ethereumWallet?.address?.equals(walletAddress, true) != true) return@launch
+            issuerCapabilityConfirmed = capability.allowed
+            issuerNavButton.visibility = if (capability.allowed) View.VISIBLE else View.GONE
+            shellIdentityText.text = ProductShellPolicy.identityLabel(walletAddress, capability.allowed)
+            settingsIdentityText.text = ProductShellPolicy.identityLabel(walletAddress, capability.allowed)
+            if (!capability.allowed && currentDestination == ProductDestination.ISSUER) {
+                showDestination(ProductDestination.MY_KEYS)
+            }
+            if (capability.allowed) {
+                productStatusText.visibility = View.GONE
+                try {
+                    recoverIssuance(walletAddress)
+                } catch (error: Throwable) {
+                    val stage = if (issuanceCoordinator.current(walletAddress)?.state ==
+                        IssuanceState.AUTHORITATIVE_READBACK
+                    ) "FINAL_READBACK" else "RECOVERY"
+                    showSafeFailure("Verify credential", error, stage)
+                }
+            }
+            refreshMyKeysInternal(walletAddress)
+        }
+    }
+
+    private fun reviewCredential() {
+        val wallet = ethereumWallet ?: return showStatus("Log in and prepare an Ethereum wallet first.")
+        runAction("Checking issuer authority and credential availability…") {
+            val existing = issuanceCoordinator.current(wallet.address)
+            if (existing != null && existing.state !in setOf(IssuanceState.DRAFT, IssuanceState.REGISTER_READY)) {
+                renderIssuance(existing)
+                showStatus("An issuance is already in progress. Resume it instead of registering again.")
+                return@runAction
+            }
+            val review = CredentialReviewPolicy.prepare(artworkInput.text.toString())
+            val request = registerRequest(wallet.address)
+            preflightRegister(request)
+            showCredentialReview(review, recordsOnly = false)
+        }
+    }
+
+    private fun submitRegister(review: CredentialReviewDraft) {
+        val wallet = ethereumWallet ?: return
+        val runner = contractRunner ?: return
+        val request = registerRequest(wallet.address)
+        runAction(
+            "Rechecking credential before wallet approval…",
+            actionName = "Create credential",
+            stage = "TX1_SUBMISSION",
+        ) {
+            require(CredentialReviewPolicy.matchesCurrentArtwork(review, artworkInput.text.toString())) {
+                "CREDENTIAL_CHANGED_REVIEW_AGAIN"
+            }
+            val existing = issuanceCoordinator.current(wallet.address)
+            require(existing == null || existing.state in setOf(IssuanceState.DRAFT, IssuanceState.REGISTER_READY)) {
+                "ISSUANCE_ALREADY_IN_PROGRESS"
+            }
+            runner.verifyNewSubmission(request) {
+                require(CredentialReviewPolicy.matchesCurrentArtwork(review, artworkInput.text.toString())) {
+                    "CREDENTIAL_CHANGED_REVIEW_AGAIN"
+                }
+                preflightRegister(request)
+            }
+            require(CredentialReviewPolicy.matchesCurrentArtwork(review, artworkInput.text.toString())) {
+                "CREDENTIAL_CHANGED_REVIEW_AGAIN"
+            }
+            val fingerprint = CredentialAbi.calldataFingerprint(request.data)
+            val operation = credentialTransactionEngine.latestForWallet(
+                wallet.address, ContractTransactionRunner.REGISTER_OPERATION,
+            )?.takeIf {
+                it.state in setOf(
+                    TransactionOperationState.DRAFT,
+                    TransactionOperationState.READY_TO_REVIEW,
+                    TransactionOperationState.READY_TO_SUBMIT,
+                ) && it.targetAddress.equals(request.to, true) && it.dataSummary == fingerprint
+            } ?: runner.create(request)
+            val session = issuanceCoordinator.beginRegister(wallet.address, review.avatarUri, operation.operationId)
+            runner.review(operation.operationId)
+            renderIssuance(session)
+            val result = runner.submit(
+                operationId = operation.operationId,
+                request = request,
+                preflight = {
+                    require(CredentialReviewPolicy.matchesCurrentArtwork(review, artworkInput.text.toString())) {
+                        "CREDENTIAL_CHANGED_REVIEW_AGAIN"
+                    }
+                    preflightRegister(request)
+                },
+                onChanged = { operation ->
+                    if (operation.state in setOf(
+                            TransactionOperationState.SUBMITTING_NO_HASH,
+                            TransactionOperationState.HASH_RECEIVED,
+                            TransactionOperationState.CONFIRMING,
+                            TransactionOperationState.ONCHAIN_READBACK,
+                        )
+                    ) {
+                        issuanceCoordinator.registerSubmitted()
+                    }
+                    issuanceCoordinator.current(wallet.address)?.let(::renderIssuance)
+                },
+            )
+            if (result.status == MobileIssuerStatus.CONFIRMED) {
+                try {
+                    renderIssuance(issuanceCoordinator.registerConfirmed())
+                    showStatus("Registration confirmed. Review and resume setup to configure records.")
+                } catch (error: Throwable) {
+                    throw StagedActionException("POST_TX1_FINALIZATION", error)
+                }
+            } else {
+                renderIssuance(issuanceCoordinator.current(wallet.address)!!)
+                showStatus("We could not confirm registration. The existing attempt will be recovered before any retry.")
+            }
+        }
+    }
+
+    private fun reviewRecords() {
+        val wallet = ethereumWallet ?: return
+        runAction(
+            "Checking registered credential before record setup…",
+            actionName = "Resume setup",
+            stage = "TX2_REVIEW_PREFLIGHT",
+        ) {
+            val session = issuanceCoordinator.current(wallet.address) ?: error("ISSUANCE_SESSION_REQUIRED")
+            val configuration = CredentialConfigurationPolicy.prepare(session)
+            val request = recordsRequest(wallet.address, configuration.calldata)
+            preflightRecords(request, session)
+            showCredentialReview(
+                configuration.review,
+                recordsOnly = true,
+                configurationCalldata = configuration.calldata,
+            )
+        }
+    }
+
+    private fun resumeIssuance() {
+        val wallet = ethereumWallet ?: return
+        if (issuanceCoordinator.current(wallet.address)?.state == IssuanceState.AUTHORITATIVE_READBACK) {
+            runAction(
+                "Retrying confirmed credential verification…",
+                actionName = "Verify credential",
+                stage = "FINAL_READBACK",
+            ) { authoritativeReadback() }
+        } else {
+            reviewRecords()
+        }
+    }
+
+    private fun submitRecords(review: CredentialReviewDraft, reviewedCalldata: String) {
+        val wallet = ethereumWallet ?: return
+        val runner = contractRunner ?: return
+        runAction(
+            "Rechecking access setup before wallet approval…",
+            actionName = "Configure credential",
+            stage = "TX2_SUBMISSION",
+        ) {
+            var session = issuanceCoordinator.current(wallet.address) ?: error("ISSUANCE_SESSION_REQUIRED")
+            val configuration = CredentialConfigurationPolicy.prepare(session)
+            require(review.avatarUri == session.avatarUri) { "CREDENTIAL_CHANGED_REVIEW_AGAIN" }
+            require(reviewedCalldata == configuration.calldata) { "CREDENTIAL_CHANGED_REVIEW_AGAIN" }
+            val request = recordsRequest(wallet.address, configuration.calldata)
+            runner.verifyNewSubmission(request) { preflightRecords(request, session) }
+            val fingerprint = CredentialAbi.calldataFingerprint(request.data)
+            val operation = credentialTransactionEngine.latestForWallet(
+                wallet.address, ContractTransactionRunner.RECORDS_OPERATION,
+            )?.takeIf {
+                it.state in setOf(
+                    TransactionOperationState.DRAFT,
+                    TransactionOperationState.READY_TO_REVIEW,
+                    TransactionOperationState.READY_TO_SUBMIT,
+                ) && it.targetAddress.equals(request.to, true) && it.dataSummary == fingerprint
+            } ?: runner.create(request)
+            if (session.state == IssuanceState.REGISTERED_CONFIGURING) {
+                session = issuanceCoordinator.recordsReady(operation.operationId)
+            }
+            runner.review(operation.operationId)
+            renderIssuance(session)
+            val result = runner.submit(
+                operation.operationId,
+                request,
+                preflight = { preflightRecords(request, session) },
+                onChanged = { operation ->
+                    if (operation.state in setOf(
+                            TransactionOperationState.SUBMITTING_NO_HASH,
+                            TransactionOperationState.HASH_RECEIVED,
+                            TransactionOperationState.CONFIRMING,
+                            TransactionOperationState.ONCHAIN_READBACK,
+                        )
+                    ) {
+                        issuanceCoordinator.recordsSubmitted()
+                    }
+                    issuanceCoordinator.current(wallet.address)?.let(::renderIssuance)
+                },
+            )
+            when {
+                result.status == MobileIssuerStatus.CONFIRMED -> {
+                    issuanceCoordinator.recordsConfirmed()
+                    authoritativeReadback()
+                }
+                credentialTransactionEngine.find(operation.operationId)?.state == TransactionOperationState.REVERTED -> {
+                    renderIssuance(issuanceCoordinator.recordsFailed())
+                    showStatus("Record transaction failed. Registration is preserved; Resume setup retries records only.")
+                }
+                else -> {
+                    renderIssuance(issuanceCoordinator.current(wallet.address)!!)
+                    showStatus("We could not confirm setup. The existing attempt will be recovered before any retry.")
+                }
+            }
+        }
+    }
+
+    private suspend fun preflightRegister(request: ContractTransactionRequest) {
+        val capability = credentialReader.issuerCapability(request.from)
+        require(capability.allowed) { "ISSUER_AUTHORITY_${capability.category}" }
+        val snapshot = credentialReader.read(IssuerSpace.fullName)
+        CredentialProductPolicy.requireAvailable(snapshot)
+        CredentialValidation.validateExpiry(
+            BigInteger.valueOf(IssuerSpace.STAFF_EXPIRY),
+            snapshot.snapshotTimestamp ?: error("BLOCK_TIME_MISSING"),
+        )
+        require(BigInteger.valueOf(IssuerSpace.STAFF_EXPIRY) < (capability.namespaceExpiry
+            ?: error("NAMESPACE_EXPIRY_MISSING"))) { "EXPIRY_OUTSIDE_NAMESPACE" }
+        credentialReader.simulate(request.from, request.to, request.data)
+    }
+
+    private suspend fun preflightRecords(request: ContractTransactionRequest, session: IssuanceSession) {
+        require(request.from.equals(IssuerSpace.issuer, true)) { "WRONG_ISSUER" }
+        require(request.to.equals(IssuerSpace.resolver, true)) { "WRONG_RESOLVER" }
+        require(request.data == CredentialConfigurationPolicy.calldata(session)) { "TRANSACTION_DATA_MISMATCH" }
+        require(credentialRpcClient.chainId() == BigInteger.valueOf(IssuerSpace.chainId)) { "WRONG_CHAIN" }
+        val latest = credentialRpcClient.transactionCount(request.from, "latest")
+        val pending = credentialRpcClient.transactionCount(request.from, "pending")
+        require(latest == BigInteger.TWO && pending == BigInteger.TWO) { "UNEXPECTED_ISSUER_NONCE" }
+        val capability = credentialReader.issuerCapability(request.from)
+        require(capability.allowed) { "ISSUER_AUTHORITY_${capability.category}" }
+        val registerOperation = session.registerOperationId?.let(credentialTransactionEngine::find)
+        require(registerOperation?.state == TransactionOperationState.CONFIRMED) { "REGISTER_RECEIPT_NOT_CONFIRMED" }
+        require(registerOperation.postLatestNonce == "2" && registerOperation.postPendingNonce == "2") {
+            "REGISTER_NONCE_EVIDENCE_MISMATCH"
+        }
+        val snapshot = credentialReader.read(session.fullName)
+        require(snapshot.readStatus == CredentialReadStatus.FRESH) { "CREDENTIAL_STATE_UNKNOWN" }
+        require(snapshot.status == CredentialRegistryStatus.REGISTERED) { "CREDENTIAL_NOT_REGISTERED" }
+        require(snapshot.owner.equals(session.holder, true)) { "WRONG_OWNER" }
+        require(snapshot.resolver.equals(IssuerSpace.resolver, true)) { "WRONG_RESOLVER" }
+        require(snapshot.subregistry.equals(IssuerSpace.ZERO_ADDRESS, true)) { "WRONG_SUBREGISTRY" }
+        require(snapshot.registryExpiry == session.expiry) { "WRONG_REGISTRY_EXPIRY" }
+        require(snapshot.ownerRoleBitmap == BigInteger.ZERO && snapshot.transferable == false) {
+            "CREDENTIAL_TRANSFERABLE"
+        }
+        require(snapshot.description.orEmpty().isEmpty()) { "DESCRIPTION_ALREADY_SET" }
+        require(snapshot.avatarUri.orEmpty().isEmpty()) { "AVATAR_ALREADY_SET" }
+        require(snapshot.accessActive == null && snapshot.accessValidUntil == null) { "ACCESS_ALREADY_SET" }
+        require(snapshot.provenanceMatches) { "WRONG_PROVENANCE" }
+        credentialReader.simulate(request.from, request.to, request.data)
+    }
+
+    private fun registerRequest(wallet: String) = ContractTransactionRequest(
+        ContractTransactionRunner.REGISTER_OPERATION,
+        wallet,
+        IssuerSpace.registry,
+        CredentialAbi.register(
+            IssuerSpace.STAFF_LABEL,
+            IssuerSpace.STAFF_HOLDER,
+            IssuerSpace.resolver,
+            BigInteger.valueOf(IssuerSpace.STAFF_EXPIRY),
+        ),
+    )
+
+    private fun recordsRequest(wallet: String, calldata: String) = ContractTransactionRequest(
+        ContractTransactionRunner.RECORDS_OPERATION,
+        wallet,
+        IssuerSpace.resolver,
+        calldata,
+    )
+
+    private suspend fun authoritativeReadback() {
+        val wallet = ethereumWallet ?: return
+        val session = issuanceCoordinator.current(wallet.address) ?: return
+        renderIssuance(issuanceCoordinator.beginReadback())
+        val recordsOperation = session.recordsOperationId?.let(credentialTransactionEngine::find)
+        val minimumBlock = CredentialFinalReadbackPolicy.confirmedReceiptBlock(session, recordsOperation)
+        credentialFinalReadback.reconcile(
+            expected = CredentialExpectation(
+                session.fullName,
+                session.holder,
+                IssuerSpace.resolver,
+                session.expiry,
+                session.description,
+                session.avatarUri,
+            ),
+            minimumBlock = minimumBlock,
+        )
+        val ready = issuanceCoordinator.ready()
+        renderIssuance(ready)
+        showStatus(ProductShellPolicy.credentialVerificationMessage(ready.state))
+    }
+
+    private suspend fun recoverIssuance(wallet: String) {
+        val session = issuanceCoordinator.current(wallet) ?: return
+        val register = session.registerOperationId?.let(credentialTransactionEngine::find)
+        val records = session.recordsOperationId?.let(credentialTransactionEngine::find)
+        when (issuanceCoordinator.recoveryAction(session, register, records)) {
+            IssuanceRecoveryAction.RECOVER_REGISTER -> {
+                renderIssuance(session)
+                val result = checkNotNull(contractRunner).recover(
+                    register!!.operationId, registerRequest(wallet),
+                ) {
+                    issuanceCoordinator.current(wallet)?.let(::renderIssuance)
+                }
+                if (result.status == MobileIssuerStatus.CONFIRMED) {
+                    renderIssuance(issuanceCoordinator.registerConfirmed())
+                }
+            }
+            IssuanceRecoveryAction.RECOVER_RECORDS -> {
+                renderIssuance(session)
+                val result = checkNotNull(contractRunner).recover(
+                    records!!.operationId,
+                    recordsRequest(wallet, CredentialConfigurationPolicy.calldata(session)),
+                ) {
+                    issuanceCoordinator.current(wallet)?.let(::renderIssuance)
+                }
+                if (result.status == MobileIssuerStatus.CONFIRMED) {
+                    issuanceCoordinator.recordsConfirmed()
+                    authoritativeReadback()
+                }
+            }
+            IssuanceRecoveryAction.READBACK -> {
+                if (session.state == IssuanceState.RECORDS_SUBMITTED &&
+                    records?.state == TransactionOperationState.CONFIRMED
+                ) issuanceCoordinator.recordsConfirmed()
+                authoritativeReadback()
+            }
+            IssuanceRecoveryAction.RESUME_RECORDS -> {
+                val resumed = if (session.state in setOf(IssuanceState.REGISTER_SUBMITTED, IssuanceState.REGISTER_CONFIRMED) &&
+                    register?.state == TransactionOperationState.CONFIRMED
+                ) issuanceCoordinator.registerConfirmed() else session
+                renderIssuance(resumed)
+            }
+            else -> renderIssuance(session)
+        }
+    }
+
+    private fun renderIssuance(session: IssuanceSession) {
+        createReviewButton.visibility = if (ProductShellPolicy.createCredentialVisible(session.state)) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+        val retryVerification = ProductShellPolicy.retryVerificationVisible(session.state)
+        resumeSetupButton.text = if (retryVerification) "Retry verification" else "Resume setup"
+        resumeSetupButton.visibility = if (ProductShellPolicy.resumeSetupVisible(session.state) || retryVerification) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+        copyCredentialButton.visibility = if (session.state == IssuanceState.READY) View.VISIBLE else View.GONE
+        val register = session.registerOperationId?.let(credentialTransactionEngine::find)
+        val records = session.recordsOperationId?.let(credentialTransactionEngine::find)
+        val progress = ProductShellPolicy.issuanceProgress(session, register, records)
+        productStatusText.visibility = if (progress == null) View.GONE else View.VISIBLE
+        productStatusText.text = progress?.visibleText().orEmpty()
+    }
+
+    private fun importCredential() {
+        val wallet = ethereumWallet ?: return showStatus("Log in before importing a credential.")
+        runAction("Verifying credential ownership onchain…") {
+            val fullName = CredentialValidation.normalizeFullName(importCredentialInput.text.toString())
+            val snapshot = credentialReader.read(fullName)
+            require(CredentialProductPolicy.ownedBy(snapshot, wallet.address)) {
+                "CREDENTIAL_NOT_OWNED_BY_THIS_WALLET"
+            }
+            credentialIndex.add(wallet.address, CredentialReference(IssuerSpace.chainId, fullName))
+            importCredentialInput.text.clear()
+            refreshMyKeysInternal(wallet.address)
+            showStatus("Credential imported after authoritative ownership verification.")
+        }
+    }
+
+    private fun refreshMyKeys() {
+        val wallet = ethereumWallet ?: return showStatus("Log in before refreshing My Keys.")
+        runAction("Refreshing My Keys from Sepolia…") { refreshMyKeysInternal(wallet.address) }
+    }
+
+    private suspend fun refreshMyKeysInternal(wallet: String) {
+        val references = credentialIndex.list(wallet)
+        myKeysCards.removeAllViews()
+        if (references.isEmpty()) {
+            myKeysEmptyCard.visibility = View.VISIBLE
+            myKeysActions.visibility = View.GONE
+            myKeysText.text = "No credentials yet"
+            return
+        }
+        var unavailable = 0
+        references.forEach { reference ->
+            val snapshot = credentialReader.read(reference.fullName)
+            if (CredentialProductPolicy.ownedBy(snapshot, wallet)) {
+                myKeysCards.addView(credentialCard(
+                    fullName = snapshot.fullName,
+                    access = if (snapshot.authoritativeAllowed) "Allowed" else "Not allowed",
+                    transferable = if (snapshot.transferable == false) "Non-transferable" else "Transferable",
+                    description = snapshot.description.orEmpty().ifBlank { "Not set" },
+                    artwork = snapshot.avatarUri.orEmpty(),
+                ), cardParams())
+            } else {
+                unavailable += 1
+            }
+        }
+        if (myKeysCards.childCount > 0) {
+            myKeysEmptyCard.visibility = View.GONE
+            myKeysActions.visibility = View.VISIBLE
+        } else {
+            myKeysEmptyCard.visibility = View.VISIBLE
+            myKeysActions.visibility = View.GONE
+            myKeysText.text = if (unavailable > 0) {
+                "No verified credentials found"
+            } else {
+                "No credentials yet"
+            }
+        }
+    }
+
+    private fun copyCredentialName() = copyPublicProof("Credential name", IssuerSpace.fullName)
 
     private fun onIssuerConfirmationChanged(checked: Boolean) {
         Log.i(M1_LOG_TAG, "M1_CONFIRMATION_CHANGED checked=$checked")
@@ -794,14 +1985,20 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun runAction(progress: String, action: suspend () -> Unit) {
+    private fun runAction(
+        progress: String,
+        actionName: String = "Operation",
+        stage: String = "ACTION",
+        action: suspend () -> Unit,
+    ) {
         setBusy(true)
         showStatus(progress)
         activityScope.launch {
             try {
                 action()
             } catch (error: Throwable) {
-                showSafeFailure("Operation", error)
+                val staged = error as? StagedActionException
+                showSafeFailure(actionName, staged?.original ?: error, staged?.safeStage ?: stage)
             } finally {
                 setBusy(false)
             }
@@ -810,6 +2007,10 @@ class MainActivity : Activity() {
 
     private fun setBusy(isBusy: Boolean) {
         operationButtons.forEach { it.isEnabled = !isBusy }
+        if (::createReviewButton.isInitialized) createReviewButton.isEnabled = !isBusy
+        if (::resumeSetupButton.isInitialized) resumeSetupButton.isEnabled = !isBusy
+        if (::copyCredentialButton.isInitialized) copyCredentialButton.isEnabled = !isBusy
+        if (::artworkInput.isInitialized) artworkInput.isEnabled = !isBusy
         copyWalletButton.isEnabled = !isBusy && ethereumWallet != null
         copySignatureButton.isEnabled = !isBusy && gateBSignature != null
         if (::issuerConfirmation.isInitialized) {
@@ -840,15 +2041,41 @@ class MainActivity : Activity() {
         hceSignerText.text = "HCE SIGNER:\n$status"
     }
 
-    private fun showSafeFailure(operation: String, error: Throwable) {
-        showStatus("$operation failed (${safeErrorClass(error)}).")
+    private fun showSafeFailure(operation: String, error: Throwable, stage: String = "ACTION") {
+        val failure = SafeActionFailurePolicy.from(operation, stage, error)
+        lastActionFailure = failure
+        actionFailureText.text = failure.diagnosticText()
+        showStatus(failure.humanMessage)
     }
 
     private fun safeErrorClass(error: Throwable): String =
         error::class.simpleName?.take(80) ?: "Error"
 
+    private class StagedActionException(
+        val safeStage: String,
+        val original: Throwable,
+    ) : RuntimeException(null, original)
+
     private fun showStatus(status: String) {
         statusText.text = "STATUS:\n$status"
+        when {
+            loggedOutView.visibility == View.VISIBLE -> loginFeedbackText.text = status
+            currentDestination != ProductDestination.DIAGNOSTICS -> {
+                shellFeedbackText.text = status
+                shellFeedbackText.visibility = View.VISIBLE
+                val persistent = listOf("could not", "failed", "missing", "unavailable")
+                    .any { status.contains(it, ignoreCase = true) }
+                if (!persistent) {
+                    shellFeedbackText.postDelayed({
+                        if (shellFeedbackText.text.toString() == status &&
+                            currentDestination != ProductDestination.DIAGNOSTICS
+                        ) {
+                            shellFeedbackText.visibility = View.GONE
+                        }
+                    }, 3_500L)
+                }
+            }
+        }
     }
 
     private companion object {
@@ -859,6 +2086,10 @@ class MainActivity : Activity() {
         const val M1_RECOVERY_ISSUER = "0xFa90e8301A22833B74378C5fA3a7c120Ac512685"
         const val M1_LOG_TAG = "M1Admission"
         const val M1_READINESS_TIMEOUT_MILLIS = 30_000L
+        const val CREDENTIAL_PREFERENCES = "credential_product"
+        const val CREDENTIAL_TRANSACTION_JOURNAL = "transaction_journal_v1"
+        const val CREDENTIAL_ISSUANCE_JOURNAL = "staff_issuance_v1"
+        const val CREDENTIAL_LOCAL_INDEX = "local_index_v1"
         val SIGNATURE_PATTERN = Regex("^0x[0-9a-fA-F]{130}$")
     }
 }
