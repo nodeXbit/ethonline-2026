@@ -748,3 +748,32 @@ The physical TX1/TX2 run exposed recovery boundaries that successful happy-path 
 ### Revisit when
 
 The bounded R1 event start block and reorg/rescan policy are specified for automatic discovery, or provider behavior requires stronger receipt-finality handling.
+
+---
+
+## D-024 — Connect selected passes to resource-aware virtual gates next
+
+**Status:** Accepted
+**Date:** 2026-09-12
+
+### Decision
+
+Close the Pass Wallet Polish workstream with LockENS branding, global wallet selection, automatic R1 discovery, multi-wallet ownership partitioning, selected-pass persistence, and artwork rendering infrastructure marked PASS.
+
+Treat a real multi-pass physical stack as not yet validated until one wallet owns 2+ real credentials. Keep selected-pass HCE integration explicitly not implemented. The next architecture sequence is `Selected Pass -> Dynamic HCE -> resource-aware challenge -> virtual gate profiles -> ENS policy -> ALLOW / DENY`.
+
+Model Front Door, Lab, and Server Room as distinct logical resources that may share the same physical ESP32/PN532 rig. This decision records the intended resource model but does not implement profiles, protocol changes, or policy changes.
+
+### Why
+
+The physical product review passed the single-pass wallet experience and preserved existing HCE/NFC behavior. Binding the persisted product selection to physical presentation requires an explicit resource context and a separately reviewed protocol boundary.
+
+### Consequences
+
+- Pass Wallet Polish, LockENS branding, global wallet selection, automatic discovery, multi-wallet behavior, selected-pass persistence, and artwork infrastructure are checkpointed as PASS.
+- No HCE, Node, firmware, blockchain-write, or transaction-semantic change is part of this checkpoint.
+- Dynamic HCE and resource-aware virtual gates remain future work requiring separate implementation and validation.
+
+### Revisit when
+
+The selected-pass-to-HCE contract and resource identifier are specified, or 2+ real owned credentials are available for physical stack validation.

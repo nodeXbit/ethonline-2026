@@ -236,3 +236,14 @@ No product code has been written yet.
 - Next product P1 is automatic active-wallet discovery inside the known R1 namespace: bounded event scan for candidates, fresh authoritative ownership/state readback, wallet partitioning, automatic My Keys refresh, and manual **Add by ENS name** as a secondary recovery flow. It is not implemented.
 - Later product direction: stacked wallet-style passes, selected-pass NFC activation, real artwork, startup Privy session hydration, and configurable issuance templates.
 
+### LockENS pass wallet polish checkpoint
+
+- Physically passed the LockENS branded wallet experience on the Seeker: authenticated header fit, dedicated accessible wallet-copy icon, static Ethereum/Sepolia presentation, global active-wallet selection, and account-management-focused Settings.
+- Preserved Privy multi-wallet behavior, wallet-partitioned automatic R1 discovery, STAFF ownership filtering, and wallet-plus-chain selected-pass persistence.
+- Added full-card pass presentation, deterministic fallback artwork, bounded remote HTTPS/IPFS artwork loading, and the tested multi-pass stacking/foreground-selection policy.
+- Single-pass presentation physically passed. A real multi-pass physical stack is **NOT YET VALIDATED** and requires 2+ real owned credentials.
+- HCE integration of the selected pass is **NOT IMPLEMENTED**. Existing HCE/NFC behavior, transaction semantics, Node code, and firmware are unchanged.
+- Recorded the next architecture target without implementing it: `Selected Pass -> Dynamic HCE -> resource-aware challenge -> virtual gate profiles -> ENS policy -> ALLOW / DENY`.
+- The intended demo model may expose Front Door, Lab, and Server Room as separate logical resources over the same ESP32/PN532 rig; no resource profile was added in this checkpoint.
+- Final validation passed Android JVM tests 169/169, Node tests 173/173, Android debug assembly, and `git diff --check`.
+

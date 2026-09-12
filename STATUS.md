@@ -2,9 +2,29 @@
 
 ## Current objective
 
-WALLET EXPERIENCE FOUNDATION: PASS.
+PASS WALLET POLISH: PASS.
 
-The Android wallet foundation is physically validated with one Privy session, multiple embedded wallets, explicit active-wallet selection, wallet-partitioned My Keys, automatic R1 discovery, selected-pass persistence, and active-wallet issuer capability. The first Android-issued credential, `staff-001.keys.demo-access.eth`, remains confirmed on Sepolia; the existing `guest-001` physical fallback remains unchanged.
+LockENS branding, the global wallet selector, automatic R1 discovery, Privy multi-wallet behavior, selected-pass persistence, and artwork rendering infrastructure are complete. The single-pass presentation physically passed on the Seeker. The real multi-pass physical stack is **NOT YET VALIDATED** because it requires 2+ real owned credentials. HCE integration of the selected pass is **NOT IMPLEMENTED**.
+
+The next architecture target is:
+
+`Selected Pass -> Dynamic HCE -> resource-aware challenge -> virtual gate profiles -> ENS policy -> ALLOW / DENY`
+
+The intended demo resource model includes multiple logical resources on the same physical ESP32/PN532 rig, such as Front Door, Lab, and Server Room. These resource profiles are not implemented.
+
+## Pass wallet polish checkpoint
+
+- LockENS branding: PASS.
+- Global wallet selector: PASS.
+- Automatic R1 discovery: PASS.
+- Multi-wallet: PASS.
+- Selected pass: PASS.
+- Artwork rendering infrastructure: PASS, with HTTPS/IPFS policy checks, bounded downloads/decodes, redirect revalidation, caching, and deterministic fallback.
+- Real multi-pass physical stack: NOT YET VALIDATED — requires 2+ real owned credentials.
+- HCE integration of selected pass: NOT IMPLEMENTED.
+- Physical validation preserved wallet ownership partitioning: STAFF appears only for its actual owner.
+- HCE/NFC behavior and transaction semantics are unchanged. This checkpoint added zero blockchain writes.
+- Final validation: Android JVM tests 169/169 PASS, Node tests 173/173 PASS, Android debug assembly PASS, and `git diff --check` PASS.
 
 ## Wallet experience foundation checkpoint
 
@@ -16,17 +36,14 @@ The Android wallet foundation is physically validated with one Privy session, mu
 - Physical validation performed zero blockchain writes and created no wallet automatically.
 - Final checkpoint validation: Android JVM tests 157/157 PASS, Node tests 173/173 PASS, Android debug assembly PASS, and `git diff --check` PASS.
 
-## NEXT UI work
+## Next architecture work
 
-- Compact active-wallet selector/dropdown in Settings.
-- Inline copy-address affordance.
-- `+ Create new wallet` inside the wallet picker.
-- Sepolia Testnet network presentation with Ethereum/network icon.
-- Real credential artwork rendering.
-- Full-card artwork treatment.
-- Pass stack physical validation once multiple real credentials exist.
+- Connect the persisted Selected Pass to Dynamic HCE.
+- Add a resource-aware challenge and virtual gate profiles.
+- Evaluate each resource through authoritative ENS policy to produce ALLOW / DENY.
+- Physically validate the pass stack once 2+ real credentials are owned by one wallet.
 
-These items are explicitly deferred and are not part of the wallet-foundation checkpoint.
+These items are explicitly deferred and are not part of this checkpoint.
 
 ## Staff credential vertical implementation
 
@@ -42,7 +59,7 @@ These items are explicitly deferred and are not part of the wallet-foundation ch
 
 ## Polished Android product UI
 
-- The logged-out surface now contains only the ENS Access sign-in flow. The authenticated shell defaults to My Keys and exposes Settings; Issuer appears only after the existing fresh onchain capability check succeeds.
+- The logged-out surface now contains only the LockENS sign-in flow. The authenticated shell defaults to My Keys and exposes Settings; Issuer appears only after the existing fresh onchain capability check succeeds.
 - My Keys has an intentional empty state, dialog-based import, and reusable credential cards with explicit text-backed access status, validity, transferability, description, and deterministic artwork fallback.
 - Issuance is grouped into identity, recipient, policy, and presentation cards. Both reviews show human values and preserve the existing explicit two-transaction confirmation boundary and recovery behavior.
 - Account/network controls live in Settings. M1, HCE, Gate B/C2, signatures, and raw diagnostic state remain intact on a separate Developer Diagnostics surface.
