@@ -2,7 +2,32 @@
 
 ## Current objective
 
-MOBILE ISSUER ADMISSION and the isolated ENSv2 issuer namespace bootstrap are closed with PASS. The next objective is one complete credential vertical for `staff-001.keys.demo-access.eth`; no credential in the issuer namespace exists yet. The existing `guest-001` physical fallback remains unchanged.
+FIRST CREDENTIAL VERTICAL: PASS.
+
+The first Android-issued credential, `staff-001.keys.demo-access.eth`, is confirmed on Sepolia and the holder physically validated it in My Keys. The Android issuance state is `READY`; the existing `guest-001` physical fallback remains unchanged.
+
+## Staff credential vertical implementation
+
+- The normal Android product path now separates My Keys and issuer creation from the existing developer diagnostics.
+- Issuer controls require fresh onchain R1/S1 authority, namespace, provenance, chain, and freshness checks; matching the configured address alone is insufficient.
+- Registration and resolver records are separate recoverable Privy transactions. A confirmed registration is persisted as `REGISTERED_CONFIGURING`, so record failure/recovery never registers the credential again.
+- My Keys stores only wallet-partitioned `(chainId, fullName)` references and displays ownership/access only after a fresh coherent Sepolia read.
+- A blank artwork URI omits the `setText(node, "avatar", ...)` call. No fake URI or empty avatar record is written.
+- Physical issuance passed with exactly two explicit Android-reviewed writes. TX1 registration `0x8858c291f14659ea8e323d1af988f4ee379c2a14dc5e2cbed4db592a04e6db58` confirmed in block `11684957`; TX2 configuration `0x57a5a4bf81fcede947b83bf55dcabe065540a1254fb2d9eb10677d391cf7bb11` confirmed in block `11685150`.
+- Final authoritative state: REGISTERED to holder `0x3419148731087b970d2059C53780163B452D5FF7`, resolver S1, zero subregistry, expiry `1793487599`, owner roles `0`, non-transferable, description `Staff Access Pass`, avatar unset, and active `access.v1` through `1793487599`.
+- The holder logged in with the owner wallet and physically saw the expected STAFF ACCESS / ALLOWED pass in My Keys. Ownership was freshly revalidated onchain.
+- Recovery hardening learned from the two physical transactions: keep review pure until the final CTA; make confirmed operation transitions idempotent; treat an unset `access.v1` value as a valid pre-configuration state; and require receipt-block-aware authoritative final readback before declaring READY.
+
+## Polished Android product UI
+
+- The logged-out surface now contains only the ENS Access sign-in flow. The authenticated shell defaults to My Keys and exposes Settings; Issuer appears only after the existing fresh onchain capability check succeeds.
+- My Keys has an intentional empty state, dialog-based import, and reusable credential cards with explicit text-backed access status, validity, transferability, description, and deterministic artwork fallback.
+- Issuance is grouped into identity, recipient, policy, and presentation cards. Both reviews show human values and preserve the existing explicit two-transaction confirmation boundary and recovery behavior.
+- Account/network controls live in Settings. M1, HCE, Gate B/C2, signatures, and raw diagnostic state remain intact on a separate Developer Diagnostics surface.
+- Light/dark-aware colors, consistent spacing, rounded surfaces, restrained elevation, compact addresses, and accessible button heights are implemented with the existing native Android UI stack and no added UI dependency.
+- Physical UX audit passed on the unlocked 1200×2670, 480-dpi Android device. The edge-to-edge viewport now applies the measured 110px status-bar and 72px navigation-bar insets separately from a consistent 24dp content gutter; destination changes reset scroll position so controls cannot reopen under system UI.
+- Home, Issuer top/bottom, Review, Settings top/bottom, and Developer Diagnostics were inspected from screenshots and UI bounds. The final review shows all human values, the complete ENS name, both-step explanation, Back, and Create credential without clipping.
+- Validation: Android JVM tests 139/139 PASS, Node tests 173/173 PASS, debug assembly PASS, and `git diff --check` PASS. The final APK installed without clearing data. The audit performed zero blockchain writes and zero signatures.
 
 ## Mobile issuer admission checkpoint
 
@@ -124,9 +149,9 @@ BATCH B — DEMO RELIABILITY: PASS.
 
 ## Next
 
-1. Design and authorize one complete `staff-001.keys.demo-access.eth` vertical: issuer-side registration and records, holder ownership, readback, presentation, and verifier resolution through R1/S1.
-2. Preserve the existing `guest-001.demo-access.eth` fallback and Gate E reference path while proving the new vertical independently.
-3. Do not create staff/visitor/contractor credentials or claim dynamic physical discovery until their exact write plan and product flow are separately approved.
+1. **NEXT PRODUCT P1:** Automatically discover credentials belonging to the active wallet within the known product R1 namespace. Scan known R1 registration/ownership events from a bounded known start block only for candidates, then perform fresh authoritative readback for current ownership/state, partition results by active wallet, and refresh My Keys automatically. Keep manual entry as the secondary **Add by ENS name** recovery flow. This is not implemented yet.
+2. Preserve `guest-001.demo-access.eth` as the Gate E reference fallback and the completed staff credential as the Android product reference.
+3. Product-direction follow-ups, after shipping-critical work: stacked mobile-wallet/pass presentation; selected pass as the future NFC-active credential; real artwork rendering; explicit startup Privy session hydration state; and configurable issuance templates.
 
 ## Blockers
 

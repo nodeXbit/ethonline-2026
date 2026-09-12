@@ -719,3 +719,32 @@ The isolated branch separates issuer administration from the legacy operator-con
 ### Revisit when
 
 The first credential vertical has an exact lifecycle, record schema, authorization plan, and verification contract ready for separate approval.
+
+---
+
+## D-023 — Make confirmed mobile issuance recovery idempotent and receipt-aware
+
+**Status:** Accepted
+**Date:** 2026-09-12
+
+### Decision
+
+Treat the first Android-issued credential vertical as complete after the physical two-transaction flow and holder validation of `staff-001.keys.demo-access.eth`.
+
+Keep every transaction review pure until its final explicit CTA. Once a registration or configuration operation is confirmed, recovery transitions are idempotent and must never resubmit that write. Treat unset `access.v1` as the expected state after registration and before configuration. Declare issuance `READY` only after a bounded authoritative readback whose snapshot block is at or after the confirmed TX2 receipt block and whose complete credential invariants match.
+
+Make automatic discovery within the known product R1 namespace the next product P1. Event scans provide candidates only; fresh readback determines current ownership and state, results are partitioned by the active wallet, and manual **Add by ENS name** remains a secondary recovery path.
+
+### Why
+
+The physical TX1/TX2 run exposed recovery boundaries that successful happy-path unit tests alone could not prove. Separating intent review, durable operation state, confirmed-receipt recovery, and authoritative post-receipt state prevents accidental re-registration, configuration resend, and premature READY presentation.
+
+### Consequences
+
+- TX1 `0x8858c291f14659ea8e323d1af988f4ee379c2a14dc5e2cbed4db592a04e6db58` confirmed in block `11684957`; TX2 `0x57a5a4bf81fcede947b83bf55dcabe065540a1254fb2d9eb10677d391cf7bb11` confirmed in block `11685150`.
+- The holder physically validated the current owned credential in My Keys, and Android recovered to `READY` without another write.
+- Automatic discovery, selected-pass NFC behavior, real artwork rendering, startup Privy hydration UI, configurable templates, and stacked pass presentation remain unimplemented.
+
+### Revisit when
+
+The bounded R1 event start block and reorg/rescan policy are specified for automatic discovery, or provider behavior requires stronger receipt-finality handling.

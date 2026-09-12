@@ -222,3 +222,17 @@ No product code has been written yet.
 - Added public authoritative issuer namespace configuration and a read-only drift/onchain verifier. No RPC URL, key, Privy data, local path, or credential was added.
 - Next objective: design and separately authorize one complete `staff-001.keys.demo-access.eth` credential vertical. No staff/visitor/contractor credential or final issuer UI exists yet.
 
+## 2026-09-12
+
+### First Android-issued credential vertical checkpoint
+
+- Built and physically completed the Android issuer flow for `staff-001.keys.demo-access.eth`, with My Keys, issuer capability gating, a product/diagnostics separation, explicit two-step review, persistent transaction recovery, and authoritative final readback.
+- TX1 registration `0x8858c291f14659ea8e323d1af988f4ee379c2a14dc5e2cbed4db592a04e6db58` confirmed in block `11684957`. TX2 configuration `0x57a5a4bf81fcede947b83bf55dcabe065540a1254fb2d9eb10677d391cf7bb11` confirmed in block `11685150`. Issuer nonce finished at `3 / 3`.
+- Final onchain state is REGISTERED to `0x3419148731087b970d2059C53780163B452D5FF7`, with S1 resolver, zero subregistry, expiry `1793487599`, owner roles `0`, non-transferability, description `Staff Access Pass`, no avatar record, and active `access.v1` through `1793487599`.
+- The holder physically logged in with the owner wallet and My Keys displayed STAFF ACCESS, the full ENS name, ALLOWED, the 31 Oct 2026 validity, non-transferability, and description. Android recovered to final issuance state `READY`.
+- Two recovery incidents established general safeguards: reviews must be pure until their final CTA; already-confirmed operations and issuance transitions must be idempotent; unset `access.v1` is valid between TX1 and TX2; and final readiness must use bounded authoritative readback at or after the confirmed receipt block.
+- Final checkpoint review found no unrelated HCE, Node, firmware, or contract changes; no secret, RPC credential, auth token, raw signed transaction, or private key was added. Blank artwork remains omitted in production, and ambiguous/confirmed operations cannot blindly resend either registration or configuration.
+- Final validation passed Android JVM tests 139/139, Node tests 173/173, Android debug assembly, `git diff --check`, and a fresh read-only Sepolia reconciliation at block `11685453`.
+- Next product P1 is automatic active-wallet discovery inside the known R1 namespace: bounded event scan for candidates, fresh authoritative ownership/state readback, wallet partitioning, automatic My Keys refresh, and manual **Add by ENS name** as a secondary recovery flow. It is not implemented.
+- Later product direction: stacked wallet-style passes, selected-pass NFC activation, real artwork, startup Privy session hydration, and configurable issuance templates.
+
