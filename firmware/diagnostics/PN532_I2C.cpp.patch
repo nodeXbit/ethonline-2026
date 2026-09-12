@@ -1,0 +1,51 @@
+--- a/PN532_I2C/PN532_I2C.cpp
++++ b/PN532_I2C/PN532_I2C.cpp
+@@ -1,3 +1,11 @@
++extern "C" unsigned lockensTraceIrq();
++extern "C" unsigned lockensTraceIrqTimeout();
++extern "C" unsigned lockensTraceIrqArbitration();
++extern "C" void lockensTraceArm();
++extern "C" void lockensTraceStop();
++extern "C" unsigned lockensTraceCount();
++extern "C" int lockensTraceValue(unsigned, unsigned);
++extern "C" int lockensI2cWriteError();
+ /**
+  * @modified picospuch
+  */
+@@ -69,11 +77,31 @@
+     write(checksum);
+     write(PN532_POSTAMBLE);
+     
+-    _wire->endTransmission();
+-    
+-    DMSG('\n');
+-
+-    return readAckFrame();
++    if (command == 0x14) lockensTraceArm();
++    const uint32_t wireStarted = micros();
++    const uint8_t wireResult = _wire->endTransmission();
++    const uint32_t wireElapsed = micros() - wireStarted;
++    const int idfWriteResult = lockensI2cWriteError();
++    if (command == 0x14) lockensTraceStop();
++    
++    DMSG('\n');
++
++    const uint32_t ackStarted = micros();
++    const int8_t ackResult = readAckFrame();
++    const uint32_t ackElapsed = micros() - ackStarted;
++    if (command == 0x14) {
++        for (unsigned i=0; i<lockensTraceCount(); ++i) {
++            Serial0.printf("PN532_DRIVER_V1=PHASE:%d;RC:%d;STATE:%d;EVENT:%d;BUSY:%d;SCL:%d;SDA:%d\n",
++                lockensTraceValue(i,0),lockensTraceValue(i,1),lockensTraceValue(i,2),lockensTraceValue(i,3),
++                lockensTraceValue(i,4),lockensTraceValue(i,5),lockensTraceValue(i,6));
++        }
++        Serial0.printf("PN532_IRQ_V1=MASK:%u;TIMEOUT:%u;ARBITRATION:%u\n", lockensTraceIrq(), lockensTraceIrqTimeout(), lockensTraceIrqArbitration());
++        Serial0.printf("PN532_SAM_IDF_V1=RC:%d\n", idfWriteResult);
++        Serial0.printf("PN532_SAM_WIRE_V1=WIRE_RC:%u;WIRE_US:%lu;ACK_RC:%d;ACK_US:%lu\n",
++            static_cast<unsigned>(wireResult), static_cast<unsigned long>(wireElapsed),
++            static_cast<int>(ackResult), static_cast<unsigned long>(ackElapsed));
++    }
++    return ackResult;
+ }
+ 
+ int16_t PN532_I2C::getResponseLength(uint8_t buf[], uint8_t len, uint16_t timeout) {

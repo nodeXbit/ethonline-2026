@@ -1,0 +1,46 @@
+{
+  "arduinoEsp32": "3.3.11",
+  "espIdf": "v5.5.5",
+  "espIdfCommit": "b774170ff46",
+  "referenceFirmwareSha256": "4914015019c3659de25fd13d55ccb314b09ac4b0dfd7667f5407874e9b08ed9e",
+  "files": [
+    {
+      "target": "Wire/src/Wire.cpp",
+      "baseSha256": "6018a5e4c8228cacdf7596a82679a1340a0f178f50f3f2a332dcee7553a09fce",
+      "referenceSha256": "5784a4cfa3bcf2ef2ef92fc989f80ff9d079b06da7b318c962dacf3008145bea",
+      "normalizedBaseSha256": "6018a5e4c8228cacdf7596a82679a1340a0f178f50f3f2a332dcee7553a09fce",
+      "normalizedReferenceSha256": "7059e64461ceb8bad2920a4823e21d5a4d43420d92e2920fa7ea036e8a08a07a"
+    },
+    {
+      "target": "PN532_I2C/PN532_I2C.cpp",
+      "baseSha256": "8cb5080d2e3b69496c4091166d70dd0e759fd760e8093c9a2e81ab4695d87aa2",
+      "referenceSha256": "59ab41dfebeccdb97b2819e3052f56e6e2d18ba26fb4f4f407ff9e79f5fb0aff",
+      "normalizedBaseSha256": "eaf2cfff51aa48955a2fbe8cc0593157b1418d4fdddee97518950036c0596360",
+      "normalizedReferenceSha256": "7fa16fd3d3b7f802b26c9a9f39ea6ddcea5e4f2d65931e4ae036da00745d0a53"
+    },
+    {
+      "target": "PN532_I2C/i2c_master.c",
+      "baseSha256": "a3b607a86f2f609146296f9419cbfac13cd96e3b8230c51a2c0378ece5a292ed",
+      "referenceSha256": "09f5fadf8c68905818ce8081a7d417b5f166c18f2c84fda347ffafcc2bec7f85",
+      "normalizedBaseSha256": "884ee968512d8e375cd863641a325c4c8d98a21fa302b9cbcc5627f156dda790",
+      "normalizedReferenceSha256": "39f86c29aa3ae3a03b06b5290745f32ff06d20a95a29bb8f3aab6af9f75874f2"
+    }
+  ],
+  "privateHeaderSha256": "89534a28f2566308c04f8d97e21faa95bdd8f2e04a2c65023a154d73f27eef26",
+  "pn532Sources": {
+    "emulatetag.cpp": "6e67840922d628ed7e45928bd8ae72ca92b21b54053b783491fdaa6710577452",
+    "emulatetag.h": "c6681bc0a9c47c7b936df6e3c3dee4ce83e837eb05fd318027a555ede7be3f92",
+    "llcp.cpp": "23b82042dc200ff525dd7a535a3b87e7e61a620bfc6ba9933bb44eddbc4182b1",
+    "llcp.h": "0f78bc37104e8b2683dd71061cf185e2755ad9af669f747ad13e8944d89f49a1",
+    "mac_link.cpp": "dd4e343af0277aae22fcda76041c125880cd1232cced31305cb5993c4c8a1909",
+    "mac_link.h": "317e6f0c36debc98565562e7661bf12d8a8f78c0031f593fa545ff70475ce723",
+    "PN532.cpp": "b3d5216653cc2c4ef6ac433bb0b4448da7ed13b50ddb146004d1052f8993c173",
+    "PN532.h": "d88fe03b1ee76bf5939c058f706c3a3a9fb854eafded57a447753b0bf87bda5c",
+    "PN532Interface.h": "89600a2407d552806a0443ca4155d7b9ed11ddaf7c0836ae6f7ec27b90bccffa",
+    "PN532_debug.h": "dbe31aa87fb32f2b68895259c86ef74d97307102b61ba5ba272b4eb3d1aab3ae",
+    "snep.cpp": "86d2e0ba0d1eff328f7787cfc38b5981120afba88efe5ba73bd34814591e040e",
+    "snep.h": "3df26def79cd04ac2adfb8e874bcc1da056dbb8eec006c03873b8c5b4318faa4",
+    "PN532_I2C.cpp": "8cb5080d2e3b69496c4091166d70dd0e759fd760e8093c9a2e81ab4695d87aa2",
+    "PN532_I2C.h": "9643c4bb727772d1d2f7e44b8f7a3de7b3a842cf7a9e9341f4b12cd816355a8e"
+  }
+}

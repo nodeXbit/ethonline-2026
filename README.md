@@ -2,6 +2,18 @@
 
 A Sepolia prototype connecting a persistent ENSv2 credential to a physical NFC interaction. The credential remains owned and REGISTERED while its independent access state changes, so revoking entry does not burn or unregister the credential.
 
+## LockENS dynamic NFC and virtual gates
+
+The current implementation connects the selected Android pass and active Privy wallet to credential-first NFC discovery, resource-bound holder proof, authoritative ENS owner/policy verification, and a local Gate Monitor. Front Door, Lab, and Server Room share one reference ESP32/PN532 verifier. A virtual grant requires serial controller confirmation; there is no physical door actuator.
+
+The current physical flow is validated end-to-end: STAFF -> Lab -> holder verified -> registration valid -> global access Allowed -> proof fresh -> controller confirmed -> **ACCESS DENIED / RESOURCE_POLICY_MISSING**. Existing STAFF has no `resources.v1`; it was not changed. PN532/I2C boot stability remains incompletely characterized. Pixel Reader fallback is not implemented.
+
+The reference firmware SHA-256 is `4914015019c3659de25fd13d55ccb314b09ac4b0dfd7667f5407874e9b08ed9e`. See [STATUS](STATUS.md), [checkpoint audit and validation](PHYSICAL_NFC_CHECKPOINT.md), [diagnostic source patches](firmware/diagnostics/README.md), and [the dynamic NFC runbook](DYNAMIC_NFC_RUNBOOK.md).
+
+Run `npm run gate:monitor` for the preview-only monitor at `http://127.0.0.1:8790`, or `npm run gate:simulate` for the offline synthetic access matrix. The previous Studio baseline is `20c2dd9866f8c48bc0611dee34b9b272906a3429`; this checkpoint adds the physically validated dynamic state.
+
+The sections below document the earlier static-tag lifecycle demo and its separate write-capable commands.
+
 ## Architecture
 
 ```text

@@ -1,0 +1,69 @@
+--- a/PN532_I2C/i2c_master.c
++++ b/PN532_I2C/i2c_master.c
+@@ -37,6 +37,26 @@
+ #include "freertos/idf_additions.h"
+ 
+ static const char *TAG = "i2c.master";
++static int trace_rows[12][7];
++static unsigned trace_count;
++static bool trace_active;
++static _Atomic uint32_t trace_irq_mask;
++static _Atomic bool trace_irq_active;
++unsigned lockensTraceIrq(void) { return atomic_load(&trace_irq_mask); }
++unsigned lockensTraceIrqTimeout(void) { return I2C_LL_INTR_TIMEOUT; }
++unsigned lockensTraceIrqArbitration(void) { return I2C_LL_INTR_ARBITRATION; }
++void lockensTraceArm(void) { trace_count = 0; trace_active = true; atomic_store(&trace_irq_mask, 0); atomic_store(&trace_irq_active, true); }
++void lockensTraceStop(void) { trace_active = false; atomic_store(&trace_irq_active, false); }
++unsigned lockensTraceCount(void) { return trace_count; }
++int lockensTraceValue(unsigned row, unsigned col) { return row < trace_count && col < 7 ? trace_rows[row][col] : -999; }
++static void lockensTrace(i2c_master_bus_handle_t bus, int phase, int rc) {
++    if (!trace_active || trace_count >= 12) return;
++    int *row = trace_rows[trace_count++];
++    row[0]=phase; row[1]=rc; row[2]=atomic_load(&bus->status); row[3]=bus->event;
++    row[4]=i2c_ll_is_bus_busy(bus->base->hal.dev);
++    row[5]=gpio_get_level(bus->base->scl_num); row[6]=gpio_get_level(bus->base->sda_num);
++}
++
+ 
+ #define DIM(array)                (sizeof(array)/sizeof(*array))
+ #define I2C_ADDRESS_TRANS_WRITE(device_address)    (((device_address) << 1) | 0)
+@@ -116,6 +136,7 @@
+  */
+ static esp_err_t s_i2c_hw_fsm_reset(i2c_master_bus_handle_t i2c_master, bool clear_bus)
+ {
++    lockensTrace(i2c_master, clear_bus ? 2 : 4, 0);
+     esp_err_t ret = ESP_OK;
+     i2c_hal_context_t *hal = &i2c_master->base->hal;
+ #if !SOC_I2C_SUPPORT_HW_FSM_RST
+@@ -150,6 +171,7 @@
+         ret = s_i2c_master_clear_bus(i2c_master->base);
+     }
+ #endif
++    lockensTrace(i2c_master, clear_bus ? 3 : 5, ret);
+     return ret;
+ }
+ 
+@@ -683,6 +705,7 @@
+     TickType_t ticks_to_wait = (xfer_timeout_ms == -1) ? portMAX_DELAY : pdMS_TO_TICKS(xfer_timeout_ms);
+     // Sometimes when the FSM get stuck, the ACK_ERR interrupt will occur endlessly until we reset the FSM and clear bus.
+     esp_err_t ret = ESP_OK;
++    lockensTrace(i2c_master, 1, 0);
+     if (atomic_load(&i2c_master->status) == I2C_STATUS_TIMEOUT || i2c_ll_is_bus_busy(hal->dev)) {
+         ESP_RETURN_ON_ERROR(s_i2c_hw_fsm_reset(i2c_master, true), TAG, "reset hardware failed");
+     }
+@@ -724,6 +747,7 @@
+     } else {
+         s_i2c_send_commands(i2c_master, ticks_to_wait);
+         // Wait event bits
++        lockensTrace(i2c_master, 6, 0);
+         if (atomic_load(&i2c_master->status) != I2C_STATUS_DONE) {
+             ret = ESP_ERR_INVALID_STATE;
+         }
+@@ -790,6 +814,7 @@
+     BaseType_t ret = pdTRUE;
+     i2c_master->trans_done = false;
+     i2c_ll_get_intr_mask(hal->dev, &int_mask);
++    if (atomic_load(&trace_irq_active)) atomic_fetch_or(&trace_irq_mask, int_mask);
+     i2c_ll_clear_intr_mask(hal->dev, int_mask);
+     if (int_mask == 0) {
+         return;

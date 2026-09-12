@@ -1,0 +1,22 @@
+--- a/Wire/src/Wire.cpp
++++ b/Wire/src/Wire.cpp
+@@ -442,7 +442,11 @@
+ 4: other error.
+ 5: timeout
+ */
++static int32_t lockensLastWriteError = -2147483647;
++extern "C" int32_t lockensI2cWriteError() { return lockensLastWriteError; }
++
+ uint8_t TwoWire::endTransmission(bool sendStop) {
++  lockensLastWriteError = -2147483647;
+ #if SOC_I2C_SUPPORT_SLAVE
+   if (is_slave) {
+     log_e("Bus is in Slave Mode");
+@@ -456,6 +460,7 @@
+   esp_err_t err = ESP_OK;
+   if (sendStop) {
+     err = i2cWrite(num, txAddress, txBuffer, txLength, _timeOutMillis);
++    lockensLastWriteError = static_cast<int32_t>(err);
+ #if !CONFIG_DISABLE_HAL_LOCKS
+     currentTaskHandle = NULL;
+     //release lock

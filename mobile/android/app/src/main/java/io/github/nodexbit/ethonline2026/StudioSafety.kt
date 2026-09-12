@@ -192,6 +192,10 @@ object StudioManagementPreflight {
             current.snapshotBlock >= reviewed.snapshotBlock && current.owner.equals(reviewed.owner, true) &&
             current.ownerRoleBitmap == reviewed.ownerRoleBitmap) { "CREDENTIAL_CHANGED_REVIEW_AGAIN" }
         val rebuilt = when (mutation.action) {
+            StudioActionType.RESOURCE_POLICY_UPDATE -> {
+                require(current.resourcesRaw == reviewed.resourcesRaw) { "CREDENTIAL_CHANGED_REVIEW_AGAIN" }
+                PassManagementPolicy.resources(current, checkNotNull(mutation.expectedResources))
+            }
             StudioActionType.ACCESS_SUSPEND, StudioActionType.ACCESS_RESTORE, StudioActionType.ACCESS_VALIDITY -> {
                 require(current.accessActive == reviewed.accessActive && current.accessValidUntil == reviewed.accessValidUntil) { "CREDENTIAL_CHANGED_REVIEW_AGAIN" }
                 PassManagementPolicy.access(current, checkNotNull(mutation.expectedAccessActive),

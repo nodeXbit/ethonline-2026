@@ -33,7 +33,7 @@ class PrivyTypedDataSignerSource(private val privy: Privy) : TypedDataSignerSour
     }
 }
 
-private class PrivyTypedDataSigner(
+class PrivyTypedDataSigner(
     private val wallet: EmbeddedEthereumWallet,
 ) : TypedDataSigner {
     override val address: String = wallet.address

@@ -140,6 +140,7 @@ object CredentialConfigurationPolicy {
             session.expiry,
             session.accessActive,
             session.accessValidUntil,
+            session.allowedResources,
         )
         val draft = PassDraft(
             session.template,
@@ -151,6 +152,7 @@ object CredentialConfigurationPolicy {
             session.configurationTransferable,
             session.description,
             session.avatarUri,
+            session.allowedResources ?: emptySet(),
         )
         return CredentialConfigurationReviewDraft(
             review = CredentialReviewPolicy.prepare(draft, session.wallet).copy(configurationSession = session),

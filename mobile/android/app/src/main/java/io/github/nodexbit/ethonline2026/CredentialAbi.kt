@@ -164,12 +164,14 @@ object CredentialAbi {
         expiry: BigInteger,
         accessActive: Boolean = true,
         accessValidUntil: BigInteger = expiry,
+        allowedResources: Set<String>? = null,
     ): List<String> {
         val node = namehash(fullName)
         return buildList {
             if (avatarUri.isNotBlank()) add(setText(node, "avatar", avatarUri))
             add(setText(node, "description", description))
             add(setData(node, IssuerSpace.ACCESS_KEY, accessValue(accessActive, accessValidUntil)))
+            if (allowedResources != null) add(setData(node, AccessResources.KEY, Numeric.hexStringToByteArray(AccessResources.encode(allowedResources))))
         }
     }
 

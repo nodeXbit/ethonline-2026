@@ -76,6 +76,7 @@ class MainActivity : Activity() {
     private lateinit var m1ExplorerButton: Button
     private lateinit var productStatusText: TextView
     private lateinit var myKeysText: TextView
+    private lateinit var nfcReadyText: TextView
     private lateinit var importCredentialInput: EditText
     private lateinit var issuerProductSection: LinearLayout
     private lateinit var artworkInput: EditText
@@ -96,6 +97,7 @@ class MainActivity : Activity() {
     private lateinit var studioFormFields: LinearLayout
     private lateinit var studioSavedSummary: LinearLayout
     private val templateButtons = linkedMapOf<PassTemplate, Button>()
+    private val resourceInputs = linkedMapOf<String, CheckBox>()
     private lateinit var managePassesContainer: LinearLayout
     private lateinit var createReviewButton: Button
     private lateinit var resumeSetupButton: Button
@@ -265,6 +267,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (::nfcReadyText.isInitialized) nfcReadyText.removeCallbacks(nfcReadinessTick)
         stopWriteObservation?.invoke()
         activityScope.cancel()
         super.onDestroy()
@@ -426,6 +429,8 @@ class MainActivity : Activity() {
             bottomMargin = dp(18)
         })
         myKeysText = productHeading("No credentials yet").apply { gravity = Gravity.CENTER }
+        nfcReadyText = productBody("Select a pass to use NFC")
+        myKeysSection.addView(nfcReadyText, matchWrapParams())
         myKeysEmptyCard.addView(myKeysText, matchWrapParams())
         myKeysEmptyCard.addView(productBody("Credentials you receive or import will appear here.").apply {
             gravity = Gravity.CENTER
@@ -542,6 +547,12 @@ class MainActivity : Activity() {
         }
         accessCard.addView(accessActiveInput, matchWrapParams())
         accessCard.addView(transferableInput, matchWrapParams())
+        accessCard.addView(formLabel("Resources"), matchWrapParams())
+        AccessResources.all.forEach { resource ->
+            val checkbox = CheckBox(this).apply { text = resource.displayName; setTextColor(textPrimaryColor()) }
+            resourceInputs[resource.resourceId] = checkbox
+            accessCard.addView(checkbox, matchWrapParams())
+        }
         studioFormFields.addView(accessCard, cardParams())
 
         val appearanceCard = productCard()
@@ -634,6 +645,11 @@ class MainActivity : Activity() {
             showDestination(ProductDestination.SETTINGS)
         }, matchWrapParams())
         diagnosticsSection.addView(sectionHeader("DEVELOPER DIAGNOSTICS", "Technical test surfaces. Not required for normal product use."), matchWrapParams())
+        diagnosticsSection.addView(CheckBox(this).apply {
+            text = "Legacy NFC regression mode (first embedded wallet)"
+            isChecked = gateBApplication.legacyNfcEnabled
+            setOnCheckedChangeListener { _, checked -> gateBApplication.legacyNfcEnabled = checked; updateNfcReadyText() }
+        }, matchWrapParams())
         actionFailureText = diagnosticLabel("LAST ACTION FAILURE\nNone")
         diagnosticsSection.addView(actionFailureText, matchWrapParams())
         hceSignerText = diagnosticLabel("HCE SIGNER:\nLOGIN REQUIRED")
@@ -872,6 +888,7 @@ class MainActivity : Activity() {
         transferableInput.isChecked = draft.transferable
         descriptionInput.setText(draft.description)
         artworkInput.setText(draft.artworkUri)
+        resourceInputs.forEach { (id, input) -> input.isChecked = id in draft.allowedResources }
         updateDerivedPassName()
     }
 
@@ -911,6 +928,7 @@ class MainActivity : Activity() {
             transferable = transferableInput.isChecked,
             description = descriptionInput.text.toString(),
             artworkUri = artworkInput.text.toString(),
+            allowedResources = resourceInputs.filterValues { it.isChecked }.keys.toSet(),
         ).validated(now, namespaceExpiry)
     }
 
@@ -1325,6 +1343,7 @@ class MainActivity : Activity() {
                 visibility = View.GONE
                 setPadding(dp(16), 0, dp(16), dp(12))
                 addView(valueRow("Description", snapshot.description.orEmpty().ifBlank { "Not set" }), matchWrapParams())
+                addView(valueRow("Access to", if (snapshot.resourcePolicyInvalid) "Invalid resource policy" else AccessResources.names(snapshot.allowedResources)), matchWrapParams())
                 addView(valueRow("Transferability", if (snapshot.transferable == false) "Non-transferable" else "Transferable"), matchWrapParams())
                 addView(valueRow("Current owner", snapshot.owner.orEmpty()), matchWrapParams())
                 addView(valueRow("Product registry", ProductShellPolicy.compactAddress(snapshot.registry)), matchWrapParams())
@@ -1498,6 +1517,7 @@ class MainActivity : Activity() {
             addView(reviewRow("Recipient", review.exactRecipient), matchWrapParams())
             addView(reviewRow("Issuing wallet", review.issuingWallet), matchWrapParams())
             addView(reviewRow("Access", review.access), matchWrapParams())
+            addView(reviewRow("Resources", AccessResources.names(reviewDraft.passDraft?.allowedResources)), matchWrapParams())
             addView(reviewRow(
                 "Registration until",
                 if (recordsOnly) review.exactExpiry else review.expires.replace(", ", " · "),
@@ -1600,6 +1620,7 @@ class MainActivity : Activity() {
     private fun logout() {
         runAction("Logging out…") {
             writeCoordinator.clearWallet()
+            gateBApplication.nfcSelection.clear()
             gateBApplication.privy.logout()
             currentUser = null
             ethereumWallet = null
@@ -1679,6 +1700,7 @@ class MainActivity : Activity() {
 
     private fun selectWallet(wallet: EmbeddedEthereumWallet, status: String) {
         val binding = writeCoordinator.select(wallet.address, walletProviderId(wallet))
+        gateBApplication.nfcSelection.clear()
         val model = ActiveWalletPolicy.requireSelectable(authenticatedWallets.map(::walletModel), wallet.address)
         activeWalletStore.save(model)
         ethereumWallet = wallet
@@ -1951,6 +1973,7 @@ class MainActivity : Activity() {
             })
         addView(reviewRow("Access ends", formatPassExpiry(snapshot.accessValidUntil)), matchWrapParams())
         addView(reviewRow("Registration ends", formatPassExpiry(snapshot.registryExpiry)), matchWrapParams())
+        addView(reviewRow("Resources", if (snapshot.resourcePolicyInvalid) "Invalid resource policy" else AccessResources.names(snapshot.allowedResources)), matchWrapParams())
         addView(reviewRow("Transfer", if (snapshot.transferable == true) "Transferable" else "Non-transferable"), matchWrapParams())
         val savedDetails = LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.VERTICAL
@@ -1997,7 +2020,27 @@ class MainActivity : Activity() {
             }
         }
         addView(disclosureButton("Manage pass", "Access & settings", controls), matchWrapParams())
+        if (StudioActionType.RESOURCE_POLICY_UPDATE in actions) {
+            controls.addView(productButton("Manage resources", primary = false) { showResourceDialog(snapshot) }, actionParams())
+        }
         addView(controls, matchWrapParams())
+    }
+
+    private fun showResourceDialog(snapshot: CredentialSnapshot) {
+        val panel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
+        val choices = AccessResources.all.associate { resource ->
+            val input = CheckBox(this).apply {
+                text = resource.displayName; isChecked = resource.resourceId in snapshot.allowedResources.orEmpty()
+                setTextColor(textPrimaryColor())
+            }
+            panel.addView(input, matchWrapParams())
+            resource.resourceId to input
+        }
+        AlertDialog.Builder(this).setTitle("Resources").setView(panel).setNegativeButton("Back", null)
+            .setPositiveButton("Review") { _, _ ->
+                runCatching { PassManagementPolicy.resources(snapshot, choices.filterValues { it.isChecked }.keys.toSet()) }
+                    .onSuccess { reviewManagement(snapshot, it) }.onFailure { showSafeFailure("Manage resources", it) }
+            }.show()
     }
 
     private fun showAccessValidityDialog(snapshot: CredentialSnapshot) {
@@ -2103,6 +2146,7 @@ class MainActivity : Activity() {
                 StudioActionType.ACCESS_VALIDITY -> "Review access validity"
                 StudioActionType.PRESENTATION_UPDATE -> "Review presentation"
                 StudioActionType.REGISTRATION_RENEW -> "Review registration extension"
+                StudioActionType.RESOURCE_POLICY_UPDATE -> "Review resources"
                 else -> "Review action"
             })
             .setMessage(body)
@@ -2223,6 +2267,7 @@ class MainActivity : Activity() {
                 registrationExpiryInput.setText(formatDraftTime(session.expiry))
                 accessValidUntilInput.setText(formatDraftTime(session.accessValidUntil))
                 artworkInput.setText(session.avatarUri)
+                resourceInputs.forEach { (id, input) -> input.isChecked = id in session.allowedResources.orEmpty() }
                 updateDerivedPassName()
                 renderIssuance(session)
                 val binding = writeCoordinator.currentWallet() ?: return@productButton
@@ -2442,6 +2487,7 @@ class MainActivity : Activity() {
         require(snapshot.description.orEmpty().isEmpty()) { "DESCRIPTION_ALREADY_SET" }
         require(snapshot.avatarUri.orEmpty().isEmpty()) { "AVATAR_ALREADY_SET" }
         require(snapshot.accessActive == null && snapshot.accessValidUntil == null) { "ACCESS_ALREADY_SET" }
+        if (session.allowedResources != null) require(snapshot.resourcesRaw == "0x") { "RESOURCES_ALREADY_SET" }
         require(snapshot.provenanceMatches) { "WRONG_PROVENANCE" }
         credentialReader.simulate(request.from, request.to, request.data)
     }
@@ -2485,7 +2531,7 @@ class MainActivity : Activity() {
         credentialFinalReadback.reconcile(
             expected = CredentialExpectation(session.fullName, session.configurationOwner, IssuerSpace.resolver,
                 session.expiry, session.description, session.avatarUri, session.accessActive,
-                session.accessValidUntil, session.configurationRoles), minimumBlock = minimumBlock)
+                session.accessValidUntil, session.configurationRoles, session.allowedResources), minimumBlock = minimumBlock)
         val ready = issuanceCoordinator.ready(identity)
         renderIssuance(ready)
         showStatus(ProductShellPolicy.credentialVerificationMessage(ready.state))
@@ -2556,6 +2602,7 @@ class MainActivity : Activity() {
             addView(formHeading("Saved setup", session.fullName), cardParams())
             addView(reviewRow("Recipient", session.configurationOwner), matchWrapParams())
             addView(reviewRow("Access ends", StudioTime.describe(session.accessValidUntil)), matchWrapParams())
+            addView(reviewRow("Resources", AccessResources.names(session.allowedResources)), matchWrapParams())
             addView(exactReviewField("Description", session.description), matchWrapParams())
             if (session.state != IssuanceState.READY) addView(productBody("The next review checks the current onchain owner and access conditions.").apply { textSize = 12f }, matchWrapParams())
             addView(productButton("Start a new pass", primary = false) {
@@ -2584,6 +2631,7 @@ class MainActivity : Activity() {
         transferable = transferable,
         description = description,
         artworkUri = avatarUri,
+        allowedResources = allowedResources ?: emptySet(),
     )
 
     private fun importCredential() {
@@ -2622,6 +2670,8 @@ class MainActivity : Activity() {
         when (result) {
             is CredentialDiscoveryResult.Unavailable -> {
                 lastOwnedCredentials = emptyList()
+                gateBApplication.nfcSelection.clear()
+                updateNfcReadyText()
                 myKeysEmptyCard.visibility = View.VISIBLE
                 myKeysActions.visibility = View.VISIBLE
                 myKeysText.text = "Pass discovery unavailable\nPull to retry safely"
@@ -2647,6 +2697,10 @@ class MainActivity : Activity() {
         selectedName: String?,
     ) {
         myKeysCards.removeAllViews()
+        ethereumWallet?.takeIf { it.address.equals(wallet, true) }?.let {
+            gateBApplication.publishNfc(it, selectedName, credentials)
+        }
+        updateNfcReadyText()
         if (credentials.isEmpty()) {
             myKeysEmptyCard.visibility = View.VISIBLE
             myKeysActions.visibility = View.VISIBLE
@@ -3221,6 +3275,20 @@ class MainActivity : Activity() {
                 .setPositiveButton("OK", null).show()
         }
     }
+
+    private fun updateNfcReadyText() {
+        val adapter = android.nfc.NfcAdapter.getDefaultAdapter(this)
+        val service = android.content.ComponentName(this, io.github.nodexbit.ethonline2026.hce.GateC1HostApduService::class.java)
+        val componentState = packageManager.getComponentEnabledSetting(service)
+        val serviceEnabled = componentState in setOf(android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+            android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED)
+        val ready = !gateBApplication.legacyNfcEnabled && adapter?.isEnabled == true &&
+            serviceEnabled && packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_NFC_HOST_CARD_EMULATION)
+        nfcReadyText.text = gateBApplication.nfcSelection.readyText(ready)
+        nfcReadyText.removeCallbacks(nfcReadinessTick)
+        if (!isDestroyed) nfcReadyText.postDelayed(nfcReadinessTick, 1_000)
+    }
+    private val nfcReadinessTick = Runnable { updateNfcReadyText() }
 
     private fun safeErrorClass(error: Throwable): String =
         error::class.simpleName?.take(80) ?: "Error"

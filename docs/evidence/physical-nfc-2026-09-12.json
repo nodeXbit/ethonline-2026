@@ -1,0 +1,332 @@
+{
+  "firmwareSha256": "4914015019c3659de25fd13d55ccb314b09ac4b0dfd7667f5407874e9b08ed9e",
+  "tapConfirmed": true,
+  "transport": "PASS",
+  "decision": "RESOURCE_POLICY_MISSING",
+  "events": [
+    {
+      "at": "2026-09-12T13:42:08.638Z",
+      "event": "SERIAL_OPEN",
+      "port": "COM4"
+    },
+    {
+      "at": "2026-09-12T13:42:09.063Z",
+      "event": "MONITOR_STATE",
+      "status": "Initializing reader",
+      "resource": "lab",
+      "busy": true,
+      "controller": "Not confirmed",
+      "final": null
+    },
+    {
+      "at": "2026-09-12T13:42:29.336Z",
+      "event": "PN532_BUS_CLEAR",
+      "initialScl": 1,
+      "initialSda": 1,
+      "pulses": 0,
+      "scl": 1,
+      "sda": 1,
+      "ok": 1
+    },
+    {
+      "at": "2026-09-12T13:42:29.832Z",
+      "event": "PN532_BOOT_START"
+    },
+    {
+      "at": "2026-09-12T13:42:29.840Z",
+      "event": "PN532_DRIVER_STATE",
+      "phase": 1,
+      "errorCode": 0,
+      "state": 5,
+      "driverEvent": 0,
+      "busy": 0,
+      "scl": 1,
+      "sda": 1
+    },
+    {
+      "at": "2026-09-12T13:42:29.845Z",
+      "event": "PN532_DRIVER_STATE",
+      "phase": 6,
+      "errorCode": 0,
+      "state": 7,
+      "driverEvent": 1,
+      "busy": 0,
+      "scl": 1,
+      "sda": 1
+    },
+    {
+      "at": "2026-09-12T13:42:29.851Z",
+      "event": "PN532_IRQ",
+      "line": "PN532_IRQ_V1=MASK:128;TIMEOUT:256;ARBITRATION:32"
+    },
+    {
+      "at": "2026-09-12T13:42:29.856Z",
+      "event": "PN532_SAM_IDF",
+      "errorCode": 0
+    },
+    {
+      "at": "2026-09-12T13:42:29.858Z",
+      "event": "PN532_SAM_WIRE",
+      "wireResult": 0,
+      "wireMicroseconds": 1512,
+      "ackResult": 0,
+      "ackMicroseconds": 2214
+    },
+    {
+      "at": "2026-09-12T13:42:29.863Z",
+      "event": "PN532_BOOT_COMMAND",
+      "command": "14",
+      "writeResult": 0,
+      "readResult": 0
+    },
+    {
+      "at": "2026-09-12T13:42:29.880Z",
+      "event": "PN532_BOOT_COMMAND",
+      "command": "32",
+      "writeResult": 0,
+      "readResult": 0
+    },
+    {
+      "at": "2026-09-12T13:42:29.881Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "PN532_FIRMWARE=1.6"
+    },
+    {
+      "at": "2026-09-12T13:42:29.885Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "GATE_E_READY"
+    },
+    {
+      "at": "2026-09-12T13:42:29.886Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "LOCKENS_DYNAMIC_V1_READY"
+    },
+    {
+      "at": "2026-09-12T13:42:29.886Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "PRESENT_SEEKER"
+    },
+    {
+      "at": "2026-09-12T13:42:30.357Z",
+      "event": "MONITOR_STATE",
+      "status": "Reader ready \u00e2\u20ac\u201d present phone",
+      "resource": "lab",
+      "busy": true,
+      "controller": "Not confirmed",
+      "final": null
+    },
+    {
+      "at": "2026-09-12T13:43:43.556Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "TARGET_ACTIVATION: PASS"
+    },
+    {
+      "at": "2026-09-12T13:43:43.680Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "A4",
+      "wireBytes": 23,
+      "writeAckResult": 0,
+      "readCapacity": 3,
+      "readResult": 3,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:43.680Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "SELECT: PASS"
+    },
+    {
+      "at": "2026-09-12T13:43:43.736Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "40",
+      "wireBytes": 14,
+      "writeAckResult": 0,
+      "readCapacity": 67,
+      "readResult": 33,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:43.926Z",
+      "event": "GET_CREDENTIAL",
+      "credential": "staff-001.keys.demo-access.eth"
+    },
+    {
+      "at": "2026-09-12T13:43:43.926Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "WAITING_CHALLENGE"
+    },
+    {
+      "at": "2026-09-12T13:43:43.942Z",
+      "event": "MONITOR_STATE",
+      "status": "NFC session started",
+      "resource": "lab",
+      "busy": true,
+      "controller": "Not confirmed",
+      "final": null
+    },
+    {
+      "at": "2026-09-12T13:43:44.997Z",
+      "event": "CHALLENGE_SENT",
+      "bytes": 104,
+      "credentialNode": "0x722b665341600276994f7946e93c68f89942ea7408788a95775871e63fc3f94d",
+      "resource": "0xa5463be76a1c842cab9c8fa2f5460c5f35fa716fa7ee1fdad33c97e6b5a0ea25",
+      "expiresAt": "1789220684"
+    },
+    {
+      "at": "2026-09-12T13:43:45.147Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "10",
+      "wireBytes": 119,
+      "writeAckResult": 0,
+      "readCapacity": 3,
+      "readResult": 3,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:45.151Z",
+      "event": "APDU_RESPONSE",
+      "stage": "SEND_CHALLENGE",
+      "exchange": "OK",
+      "responseLength": 2,
+      "statusWord": "9000"
+    },
+    {
+      "at": "2026-09-12T13:43:45.151Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "SEND_CHALLENGE: PASS"
+    },
+    {
+      "at": "2026-09-12T13:43:45.189Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "20",
+      "wireBytes": 14,
+      "writeAckResult": 0,
+      "readCapacity": 4,
+      "readResult": 4,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:45.190Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "STATUS: PROCESSING"
+    },
+    {
+      "at": "2026-09-12T13:43:45.465Z",
+      "event": "MONITOR_STATE",
+      "status": "Credential identified",
+      "credential": "staff-001.keys.demo-access.eth",
+      "resource": "lab",
+      "busy": true,
+      "controller": "Not confirmed",
+      "final": null
+    },
+    {
+      "at": "2026-09-12T13:43:45.471Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "20",
+      "wireBytes": 14,
+      "writeAckResult": 0,
+      "readCapacity": 4,
+      "readResult": 4,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:45.762Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "20",
+      "wireBytes": 14,
+      "writeAckResult": 0,
+      "readCapacity": 4,
+      "readResult": 4,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:46.049Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "20",
+      "wireBytes": 14,
+      "writeAckResult": 0,
+      "readCapacity": 4,
+      "readResult": 4,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:46.332Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "20",
+      "wireBytes": 14,
+      "writeAckResult": 0,
+      "readCapacity": 4,
+      "readResult": 4,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:46.620Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "20",
+      "wireBytes": 14,
+      "writeAckResult": 0,
+      "readCapacity": 4,
+      "readResult": 4,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:46.620Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "STATUS: READY"
+    },
+    {
+      "at": "2026-09-12T13:43:46.700Z",
+      "event": "PN532_INTERNAL",
+      "instruction": "30",
+      "wireBytes": 14,
+      "writeAckResult": 0,
+      "readCapacity": 68,
+      "readResult": 68,
+      "controllerStatus": "00"
+    },
+    {
+      "at": "2026-09-12T13:43:46.700Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "GET_SIGNATURE: PASS"
+    },
+    {
+      "at": "2026-09-12T13:43:46.711Z",
+      "event": "PROOF_RECEIVED",
+      "bytes": 65
+    },
+    {
+      "at": "2026-09-12T13:43:47.413Z",
+      "event": "VERIFIER_COMMAND",
+      "command": "AUTHORIZATION=DENY"
+    },
+    {
+      "at": "2026-09-12T13:43:47.419Z",
+      "event": "FIRMWARE_STAGE",
+      "stage": "AUTHORIZATION: DENY"
+    },
+    {
+      "at": "2026-09-12T13:43:47.444Z",
+      "event": "SERIAL_CLOSED"
+    },
+    {
+      "at": "2026-09-12T13:43:47.477Z",
+      "event": "MONITOR_STATE",
+      "status": "Access decision confirmed",
+      "credential": "staff-001.keys.demo-access.eth",
+      "resource": "lab",
+      "busy": false,
+      "checks": {
+        "holder": "Verified",
+        "registration": "Valid",
+        "globalAccess": "Allowed",
+        "resourcePolicy": "Not checked",
+        "proof": "Fresh"
+      },
+      "controller": "Confirmed",
+      "final": "ACCESS DENIED",
+      "reason": "RESOURCE_POLICY_MISSING"
+    }
+  ],
+  "scope": "Historical authorized physical tap; no new tap or signing during checkpoint."
+}

@@ -4,6 +4,8 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
+    "gate:monitor": "node demo/gate-monitor.mjs",
+    "gate:simulate": "node scripts/security/resource-simulation.mjs",
     "demo": "node --env-file=.env.local demo/server.mjs",
     "demo:preflight": "node demo/preflight.mjs",
     "demo:bridge": "node --env-file=.env.nfc.local demo/bridge.mjs",

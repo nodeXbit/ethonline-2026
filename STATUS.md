@@ -1,22 +1,27 @@
 # Status
 
-## Current objective
+## Physical NFC checkpoint - 2026-09-12
 
-PASS STUDIO + SAFETY CHECKPOINT: VALIDATED.
+Dynamic NFC works physically end-to-end with `staff-001.keys.demo-access.eth` and virtual gate **Lab**. The authorized tap at 13:43:43-13:43:47 UTC completed discovery, the 109-byte challenge APDU, the 67-byte signature APDU response, the 65-byte holder proof, fresh authoritative verification and serial controller confirmation. Final decision: **ACCESS DENIED / RESOURCE_POLICY_MISSING**. Existing STAFF has no `resources.v1`; no resource policy was written. This is an authorization decision, not a transport failure.
 
-Studio adds editable STAFF/VISITOR/CONTRACTOR presets, capability-based creation and management, and separate recoverable registration/configuration reviews. Transaction coordination binds the reviewed wallet/provider generation, preserves late hashes, isolates issuance sessions, and links receipts to exact transactions. Unresolved submissions block replacement.
+One physical ESP32-S3/PN532 verifier simulates Front Door, Lab and Server Room. There is **no physical lock/relay actuator**. Pixel/Android Gate Reader fallback and monitor-animation work are **not implemented**.
 
-Checkpoint validation on 2026-09-12: Android JVM tests 228/228, Node tests 173/173, debug assembly, and diff whitespace checks passed. Read-only Sepolia simulation at block 11687260 passed issuance/configuration and management for all three presets, including VISITOR owner/role changes before configuration. Existing staff state and issuer nonce 3 stayed unchanged; zero blockchain writes or signatures were performed.
+PN532/I2C boot stability is **not fully characterized**. SDA recovery passed repeatedly; a ten-pass series was followed by a SCL/SAM failure. Later IRQ instrumentation has not reproduced that fault. Neither the electrical cause nor prolonged stability is established. The negative-length library defect remains unfixed.
 
-Dynamic selected-pass HCE and resource-aware gates have not started. They require this Studio checkpoint to be pushed and verified synchronized first.
+Reference firmware: `.runtime/firmware-irq-cause/pn532_dynamic_access.ino.bin`, SHA-256 `4914015019c3659de25fd13d55ccb314b09ac4b0dfd7667f5407874e9b08ed9e`. Current-source recompilation reproduced that hash. Ignored binaries remain local; diagnostic patches and source fingerprints are preserved in [firmware/diagnostics](firmware/diagnostics/README.md).
 
-LockENS branding, the global wallet selector, automatic R1 discovery, Privy multi-wallet behavior, selected-pass persistence, and artwork rendering infrastructure are complete. The single-pass presentation physically passed on the Seeker. The real multi-pass physical stack is **NOT YET VALIDATED** because it requires 2+ real owned credentials. HCE integration of the selected pass is **NOT IMPLEMENTED**.
+Checkpoint validation: **246 Android unit tests**, **229 Node tests**, `assembleDebug`, dynamic and legacy firmware builds, and the standalone Gate Monitor test pass. The monitor test is included in the Node total. The rebuilt APK matches the installed APK: `45004d6ecd239cb1ac317dc9f684cfdc4bb3182e06ac527f67c11b11b00ce909`; no APK installation is needed.
 
-The next architecture target is:
+See [checkpoint audit](PHYSICAL_NFC_CHECKPOINT.md), [sanitized physical evidence](docs/evidence/physical-nfc-2026-09-12.json), [test coordination](NFC_TEST_COORDINATION.md), and [boot/IRQ limitations](NFC_IRQ_CAUSE_INVESTIGATION.md). Checkpoint work performs no blockchain writes, real-wallet signatures, firmware flashes, credential changes, or new physical taps. Offline synthetic test cryptography is distinct from wallet signing; committed fixtures contain no serialized signatures.
 
-`Selected Pass -> Dynamic HCE -> resource-aware challenge -> virtual gate profiles -> ENS policy -> ALLOW / DENY`
+## Remaining work
 
-The intended demo resource model includes multiple logical resources on the same physical ESP32/PN532 rig, such as Front Door, Lab, and Server Room. These resource profiles are not implemented.
+- Review resource permission configuration separately; no onchain change is part of this checkpoint.
+- Characterize intermittent boot failure and prolonged operation in a later task.
+- Pixel Reader fallback is future work.
+- Real multi-pass physical validation and monitor visual QA remain incomplete.
+
+## Historical checkpoints (superseded where noted above)
 
 ## Pass wallet polish checkpoint
 
@@ -42,14 +47,14 @@ The intended demo resource model includes multiple logical resources on the same
 - Physical validation performed zero blockchain writes and created no wallet automatically.
 - Final checkpoint validation: Android JVM tests 157/157 PASS, Node tests 173/173 PASS, Android debug assembly PASS, and `git diff --check` PASS.
 
-## Next architecture work
+## Remaining physical validation
 
-- Connect the persisted Selected Pass to Dynamic HCE.
-- Add a resource-aware challenge and virtual gate profiles.
-- Evaluate each resource through authoritative ENS policy to produce ALLOW / DENY.
+- Separately authorize and flash the compiled dynamic firmware.
+- Separately authorize a holder-proof tap and verify selected staff discovery plus expected missing-resource-policy DENY.
+- Render-review the monitor and validate controller-confirmed outcomes on hardware.
 - Physically validate the pass stack once 2+ real credentials are owned by one wallet.
 
-These items are explicitly deferred and are not part of this checkpoint.
+No resource assignment or credential creation is authorized as part of this implementation task. A real resource-aware ALLOW requires an existing valid policy or a later separately reviewed Studio write.
 
 ## Staff credential vertical implementation
 

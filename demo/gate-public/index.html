@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>LockENS Gate Monitor</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><main><header><span class="brand">LockENS</span><span class="network">SEPOLIA · REFERENCE VERIFIER</span></header>
+<h1>LOCKENS GATE MONITOR</h1><p class="muted">One physical reader simulating multiple logical resources. No real door actuator.</p>
+<section class="gate"><label for="gate">Virtual Gate</label><select id="gate"><option value="front-door">Front Door</option><option value="lab">Lab</option><option value="server-room">Server Room</option></select><p id="next" class="muted">Selection applies to the next session.</p></section>
+<article><p class="eyebrow">CURRENT RESOURCE</p><h2 id="resource">Front Door</h2><p id="status" role="status">Waiting for pass</p><p id="credential" class="credential">—</p>
+<dl><div><dt>Holder</dt><dd id="holder">Not checked</dd></div><div><dt>Registration</dt><dd id="registration">Not checked</dd></div><div><dt>Global access</dt><dd id="globalAccess">Not checked</dd></div><div><dt>Resource policy</dt><dd id="resourcePolicy">Not checked</dd></div><div><dt>Proof</dt><dd id="proof">Not checked</dd></div><div><dt>Controller</dt><dd id="controller">Not confirmed</dd></div></dl>
+<div id="decision" aria-live="polite"><h2 id="final">Waiting for pass</h2><p id="reason"></p></div><button id="attempt" disabled>Start controlled tap</button><p id="physical" class="muted">Physical proof mode is disabled.</p>
+<details><summary>Diagnostics</summary><code id="category">—</code></details></article><footer>Controller confirmation is serial confirmation only. A granted result represents the virtual gate.</footer></main></body></html>

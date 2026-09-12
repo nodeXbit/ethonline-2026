@@ -102,6 +102,7 @@ data class PassDraft(
     val transferable: Boolean,
     val description: String,
     val artworkUri: String,
+    val allowedResources: Set<String> = AccessResources.defaults(template),
 ) {
     val normalizedLabel: String get() = CredentialValidation.normalizeLabel(label)
     val fullName: String get() = "$normalizedLabel.${IssuerSpace.namespace}"
@@ -109,6 +110,7 @@ data class PassDraft(
 
     fun validated(now: BigInteger, namespaceExpiry: BigInteger): PassDraft {
         CredentialValidation.normalizeLabel(label)
+        AccessResources.encode(allowedResources)
         val normalizedRecipient = CredentialValidation.requireNonZeroAddress(recipient)
         CredentialValidation.validateExpiry(registrationExpiry, now, namespaceExpiry)
         require(accessValidUntil > now) { "ACCESS_VALIDITY_NOT_FUTURE" }
@@ -202,6 +204,7 @@ enum class StudioActionType {
     ACCESS_VALIDITY,
     PRESENTATION_UPDATE,
     REGISTRATION_RENEW,
+    RESOURCE_POLICY_UPDATE,
 }
 
 object StudioOperationIdentity {
@@ -221,15 +224,27 @@ data class ManagementMutation(
     val expectedArtwork: String? = null,
     val expectedRegistrationExpiry: BigInteger? = null,
     val expectedPreservedAccessUntil: BigInteger? = null,
+    val expectedResources: Set<String>? = null,
 )
 
 object PassManagementPolicy {
+    fun resources(snapshot: CredentialSnapshot, allowed: Set<String>): ManagementMutation {
+        requireRegistered(snapshot)
+        val encoded = AccessResources.encode(allowed)
+        require(snapshot.resourcesRaw != encoded) { "NO_RESOURCE_CHANGE" }
+        return ManagementMutation(StudioActionType.RESOURCE_POLICY_UPDATE, IssuerSpace.resolver,
+            CredentialAbi.setData(CredentialAbi.namehash(snapshot.fullName), AccessResources.KEY, org.web3j.utils.Numeric.hexStringToByteArray(encoded)),
+            if (snapshot.resourcePolicyInvalid) "Invalid resource policy" else AccessResources.names(snapshot.allowedResources),
+            AccessResources.names(allowed), expectedResources = allowed.toSet())
+    }
+
     fun actions(snapshot: CredentialSnapshot, capabilities: StudioCapabilities): Set<StudioActionType> {
         if (snapshot.readStatus != CredentialReadStatus.FRESH || snapshot.status != CredentialRegistryStatus.REGISTERED ||
             !snapshot.provenanceMatches || !snapshot.registry.equals(IssuerSpace.registry, true)
         ) return emptySet()
         return buildSet {
             if (capabilities.canManageAccess == IssuerCapabilityState.ALLOWED) {
+                add(StudioActionType.RESOURCE_POLICY_UPDATE)
                 add(if (snapshot.accessActive == true) StudioActionType.ACCESS_SUSPEND else StudioActionType.ACCESS_RESTORE)
                 add(StudioActionType.ACCESS_VALIDITY)
             }
@@ -371,6 +386,7 @@ class ManagementFinalReadbackReconciler(
     }
 
     private fun matches(current: CredentialSnapshot, mutation: ManagementMutation): Boolean = when (mutation.action) {
+        StudioActionType.RESOURCE_POLICY_UPDATE -> !current.resourcePolicyInvalid && current.allowedResources == mutation.expectedResources
         StudioActionType.ACCESS_SUSPEND, StudioActionType.ACCESS_RESTORE, StudioActionType.ACCESS_VALIDITY ->
             current.accessActive == mutation.expectedAccessActive && current.accessValidUntil == mutation.expectedAccessValidUntil
         StudioActionType.PRESENTATION_UPDATE -> current.description.orEmpty() == mutation.expectedDescription &&
@@ -431,6 +447,7 @@ class ManagementSessionCoordinator(private val store: LoadableStringStateStore) 
         value.mutation.expectedArtwork.orEmpty(),
         value.mutation.expectedRegistrationExpiry?.toString().orEmpty(),
         value.mutation.expectedPreservedAccessUntil?.toString().orEmpty(),
+        value.mutation.expectedResources?.let(AccessResources::encode).orEmpty(),
     ).joinToString("|") { Base64.getUrlEncoder().withoutPadding().encodeToString(it.toByteArray(Charsets.UTF_8)) }
 
     private fun decodeAll(raw: String?): List<ManagementSession> = raw.orEmpty().lineSequence().mapNotNull { line ->
@@ -438,7 +455,7 @@ class ManagementSessionCoordinator(private val store: LoadableStringStateStore) 
             val fields = line.split('|').map {
                 String(Base64.getUrlDecoder().decode(it), Charsets.UTF_8)
             }
-            require(fields.size == 14)
+            require(fields.size in setOf(14, 15))
             ManagementSession(
                 fields[0], fields[1], fields[2],
                 ManagementMutation(
@@ -449,10 +466,11 @@ class ManagementSessionCoordinator(private val store: LoadableStringStateStore) 
                     newValue = fields[7],
                     expectedAccessActive = fields[8].takeIf(String::isNotBlank)?.toBooleanStrict(),
                     expectedAccessValidUntil = fields[9].takeIf(String::isNotBlank)?.let(::BigInteger),
-                    expectedDescription = fields[10],
-                    expectedArtwork = fields[11],
+                    expectedDescription = fields[10].takeIf { fields[3] == StudioActionType.PRESENTATION_UPDATE.name },
+                    expectedArtwork = fields[11].takeIf { fields[3] == StudioActionType.PRESENTATION_UPDATE.name },
                     expectedRegistrationExpiry = fields[12].takeIf(String::isNotBlank)?.let(::BigInteger),
                     expectedPreservedAccessUntil = fields[13].takeIf(String::isNotBlank)?.let(::BigInteger),
+                    expectedResources = fields.getOrNull(14)?.takeIf(String::isNotBlank)?.let(AccessResources::decode),
                 ),
             )
         }.getOrNull()

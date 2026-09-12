@@ -30,7 +30,10 @@ data class CredentialSnapshot(
     val readStatus: CredentialReadStatus,
     val provenanceMatches: Boolean,
     val failureCategory: String? = null,
+    val resourcesRaw: String? = null,
 ) {
+    val allowedResources: Set<String>? get() = runCatching { AccessResources.decode(resourcesRaw ?: "0x") }.getOrNull()
+    val resourcePolicyInvalid: Boolean get() = runCatching { AccessResources.decode(resourcesRaw ?: "0x") }.isFailure
     val authoritativeAllowed: Boolean
         get() = StudioAccessPolicy.status(this) == "Allowed"
 }
@@ -88,6 +91,7 @@ data class CredentialExpectation(
     val accessActive: Boolean = true,
     val accessValidUntil: BigInteger = expiry,
     val roleBitmap: BigInteger = BigInteger.ZERO,
+    val allowedResources: Set<String>? = null,
 )
 
 object CredentialReadPolicy {
@@ -113,6 +117,9 @@ object CredentialReadPolicy {
             "WRONG_ACCESS_RECORD"
         }
         require(snapshot.accessValidUntil >= snapshot.snapshotTimestamp) { "ACCESS_EXPIRED" }
+        if (expected.allowedResources != null) require(!snapshot.resourcePolicyInvalid && snapshot.allowedResources == expected.allowedResources) {
+            "WRONG_RESOURCE_RECORD"
+        }
         require(snapshot.provenanceMatches) { "WRONG_PROVENANCE" }
     }
 }
@@ -252,6 +259,11 @@ class CredentialReader(private val client: ReadOnlyEthereumRpcClient) {
                 val avatar = async { readText(resolvedResolver, node, "avatar", tag) }
                 val description = async { readText(resolvedResolver, node, "description", tag) }
                 val access = async { readAccess(resolvedResolver, node, tag) }
+                val resourcePolicy = async {
+                    if (!resolvedResolver.equals(IssuerSpace.resolver, true)) null else
+                        org.web3j.utils.Numeric.toHexString(CredentialAbi.decodeDynamicBytes(
+                            call(resolvedResolver, CredentialAbi.data(CredentialAbi.namehash(fullName), AccessResources.KEY), tag)))
+                }
                 val provenance = async { provenanceMatches(tag) }
                 val resolvedExpiry = expiry.await()
                 require(resolvedExpiry == stateExpiry) { "INCONSISTENT_EXPIRY" }
@@ -278,6 +290,7 @@ class CredentialReader(private val client: ReadOnlyEthereumRpcClient) {
                     snapshotTimestamp = timestamp,
                     readStatus = CredentialReadStatus.FRESH,
                     provenanceMatches = provenance.await(),
+                    resourcesRaw = resourcePolicy.await(),
                 )
             }
         } catch (error: Throwable) {

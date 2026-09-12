@@ -13,6 +13,11 @@ val privyLocalProperties = Properties().apply {
 }
 
 val issuerSpaceConfig = JsonSlurper().parse(rootProject.file("../../config/issuer-space.json")) as Map<*, *>
+val accessResourceConfig = JsonSlurper().parse(rootProject.file("../../config/access-resources.json")) as Map<*, *>
+val accessResourceRows = (accessResourceConfig["resources"] as List<*>).joinToString(";") {
+    val row = it as Map<*, *>
+    "${row["slug"]}|${row["displayName"]}|${row["resourceId"]}"
+}
 
 fun issuerConfigString(name: String): String =
     "\"${(issuerSpaceConfig[name] ?: error("Missing issuer config: $name")).toString().replace("\\", "\\\\").replace("\"", "\\\"")}\""
@@ -46,6 +51,7 @@ android {
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "ACCESS_RESOURCES", "\"$accessResourceRows\"")
         buildConfigField("String", "PRIVY_APP_ID", localBuildConfigString("PRIVY_APP_ID"))
         buildConfigField("String", "PRIVY_APP_CLIENT_ID", localBuildConfigString("PRIVY_APP_CLIENT_ID"))
         buildConfigField("long", "ISSUER_CHAIN_ID", "${issuerSpaceConfig["chainId"]}L")
@@ -71,6 +77,9 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+    testOptions.unitTests.all {
+        it.systemProperty("lockens.vectors", rootProject.file("../../fixtures/lockens-access-v1.properties").absolutePath)
     }
 
     packaging {

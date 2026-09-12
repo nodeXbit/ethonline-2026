@@ -1,0 +1,2 @@
+/fixtures/lockens-access-v1.properties text eol=lf
+/firmware/diagnostics/*.patch text eol=lf whitespace=-blank-at-eol

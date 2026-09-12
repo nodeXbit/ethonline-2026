@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "resources": [
+    { "slug": "front-door", "displayName": "Front Door", "resourceId": "0x42ec975e932957e2fe4f47cb698484ecd0ccd716ed14eb3d83afb5be796308a6" },
+    { "slug": "lab", "displayName": "Lab", "resourceId": "0xa5463be76a1c842cab9c8fa2f5460c5f35fa716fa7ee1fdad33c97e6b5a0ea25" },
+    { "slug": "server-room", "displayName": "Server Room", "resourceId": "0x0abcec70a5d096e96850983cba03efafdb54dc4671e461d56341c528c00e0d78" }
+  ]
+}

@@ -1,5 +1,90 @@
 # Worklog
 
+## Physical NFC checkpoint - 2026-09-12
+
+Dynamic NFC works physically end-to-end with `staff-001.keys.demo-access.eth` and virtual gate **Lab**. The authorized tap at 13:43:43-13:43:47 UTC completed discovery, the 109-byte challenge APDU, the 67-byte signature APDU response, the 65-byte holder proof, fresh authoritative verification and serial controller confirmation. Final decision: **ACCESS DENIED / RESOURCE_POLICY_MISSING**. Existing STAFF has no `resources.v1`; no resource policy was written. This is an authorization decision, not a transport failure.
+
+One physical ESP32-S3/PN532 verifier simulates Front Door, Lab and Server Room. There is **no physical lock/relay actuator**. Pixel/Android Gate Reader fallback and monitor-animation work are **not implemented**.
+
+PN532/I2C boot stability is **not fully characterized**. SDA recovery passed repeatedly; a ten-pass series was followed by a SCL/SAM failure. Later IRQ instrumentation has not reproduced that fault. Neither the electrical cause nor prolonged stability is established. The negative-length library defect remains unfixed.
+
+Reference firmware: `.runtime/firmware-irq-cause/pn532_dynamic_access.ino.bin`, SHA-256 `4914015019c3659de25fd13d55ccb314b09ac4b0dfd7667f5407874e9b08ed9e`. Current-source recompilation reproduced that hash. Ignored binaries remain local; diagnostic patches and source fingerprints are preserved in [firmware/diagnostics](firmware/diagnostics/README.md).
+
+Checkpoint validation: **246 Android unit tests**, **229 Node tests**, `assembleDebug`, dynamic and legacy firmware builds, and the standalone Gate Monitor test pass. The monitor test is included in the Node total. The rebuilt APK matches the installed APK: `45004d6ecd239cb1ac317dc9f684cfdc4bb3182e06ac527f67c11b11b00ce909`; no APK installation is needed.
+
+See [checkpoint audit](PHYSICAL_NFC_CHECKPOINT.md), [sanitized physical evidence](docs/evidence/physical-nfc-2026-09-12.json), [test coordination](NFC_TEST_COORDINATION.md), and [boot/IRQ limitations](NFC_IRQ_CAUSE_INVESTIGATION.md). Checkpoint work performs no blockchain writes, real-wallet signatures, firmware flashes, credential changes, or new physical taps. Offline synthetic test cryptography is distinct from wallet signing; committed fixtures contain no serialized signatures.
+
+
+### Checkpoint housekeeping
+
+Audited changed and untracked source/documentation. Ignored generated Arduino build folders without deleting them. Removed the serialized synthetic signature from shared vectors; Android transport tests use generated opaque bytes, and cross-language challenge/digest checks remain. Pinned fixture LF endings after Windows line-ending mismatches in the first Node run. Android initial SDK-path failure was resolved by setting ANDROID_HOME. No production feature, transport algorithm, policy or APK was changed during this checkpoint. Commit/push is explicitly authorized to origin/main; final synchronization is verified after commit.
+
+## Earlier task history
+
+
+## 2026-09-12 11:32 UTC ? Dynamic NFC physical exchange validated
+
+Authorized tap completed SELECT, exact STAFF discovery, SEND_CHALLENGE (109 bytes, 9000), signature retrieval and fresh holder proof verification. Controller confirmed DENY / RESOURCE_POLICY_MISSING for Lab, the expected policy result. No blockchain writes. Firmware 13528830db96b27c84dc14d7e8ccc6a46822ada30a959aa7f70d6071471e5bb0. Initialization remains intermittent: WIRE_RC=2 on the preceding manual reset, then 0 on retry. See NFC_FIX_VALIDATION.md and .runtime/nfc-init-audit-hce-result.json. Monitor idle, serial closed, Android capture stopped.
+
+## 2026-09-12 - Physical retry of restored dynamic APDU firmware
+
+- User requested a test after restoration. Started the production monitor in Lab and sanitized Android HCE capture. Initial phone readiness expired/not confirmed, so no attempt was opened until a fresh read-only refresh showed STAFF and Ready to tap. Lab and idle state were checked immediately before arming.
+- With COM4 capturing, performed authorized ROM identification/reset through COM3 without flashing. At 11:07:45 UTC the restored d3317cd... dynamic APDU build stopped at INITIALIZATION: PN532 did not ACK at I2C address 0x24. COM4 closed; final TRANSPORT_FAILURE. No SELECT, challenge or proof; no coordinated tap, new flash, source edit or blockchain write. Same explicit initialization failure previously occurred on legacy; original SEND_CHALLENGE issue remains untested here. Evidence: .runtime/restored-dynamic-attempt-result.json.
+
+## 2026-09-12 - User-requested restoration of partially working dynamic APDU build
+
+- User explicitly requested flashing the version that had worked partially. Restored existing .runtime/firmware-dynamic-apdu/pn532_dynamic_access.ino.bin, SHA-256 d3317cd06edd7b6b76d227602a65e54f10eeed6fff3ddfeb9725a980633fdf28, through COM4. Upload exit 0; bootloader and partitions verified unchanged, boot_app0 and application written and hashes verified. No source change or rebuild. Evidence: .runtime/dynamic-apdu-restore-result.json and its referenced upload log.
+- This is the build that previously initialized and discovered STAFF but failed SEND_CHALLENGE. Restoration is not a demonstrated repair. No new physical tap or initialization validation performed during this restoration. It replaces the legacy firmware currently installed; the planned dynamic-original B artifact was not used.
+
+## 2026-09-12 - Legacy retry after user reconnection
+
+- User reconnected COM3/COM4 and requested another test. Both ports retained their identities; ROM on COM3 again matched the same ESP32-S3. No flash or source changes. COM4 captured flash boot and firmware execution, then INITIALIZATION STOP / PN532 did not ACK at I2C address 0x24 at 10:34:03 UTC. Captured 506 bytes, no unknown lines; SELECT and NFC exchange not reached, zero protocol writes. Closed capture and recorded .runtime/nfc-reconnected-legacy-boot-result.json. Reconnection did not eliminate the observed legacy initialization failure; B remains unexecuted.
+
+## 2026-09-12 - COM3/COM4 diagnostic: legacy reproduces I2C init failure
+
+- User connected COM3 and authorized diagnostic tests. Identified COM4 as CH343 and COM3 as native Espressif USB-Serial/JTAG; ROM MAC <DEVICE_MAC> matches the same ESP32-S3. No flash, rebuild or source modification. Additional USB connection is a changed condition relative to A1/A2.
+- First ROM identification/reset through COM3, while observing COM4, produced PN532 1.6, GATE_E_READY and PRESENT_SEEKER at 10:24:02 UTC. The second controlled reset, with the same legacy binary and no intervening flash/power disconnection, produced INITIALIZATION STOP / PN532 did not ACK at I2C address 0x24 at 10:28:06 UTC. No SELECT, challenge, proof, policy evaluation or blockchain write occurred.
+- The explicit initialization failure is therefore not exclusive to dynamic firmware; legacy startup was intermittent in this setup. Exact common-layer cause and earlier SEND_CHALLENGE failure remain unresolved. Closed COM4 and Android capture, restored legacy Android option OFF. B not run. Evidence: NFC_PORT_DIAGNOSTIC_RESULT.md and .runtime/nfc-port-diagnostic-result.json.
+
+## 2026-09-12 - Legacy boot observation A2
+
+- User authorized another boot observation with the existing legacy firmware. No flash, rebuild, source edit, Android setting change or serial protocol write. Opened COM4 at 115200 and captured all UART byte counts plus sanitized recognized/unknown-line counts from 10:14:19 to 10:16:19 UTC. Result: zero bytes/chunks/lines, no serial error event; closed on timeout. User RESET confirmation remains pending, so no PN532 failure or common/dynamic-specific diagnosis is established. Evidence: NFC_AB_A2_BOOT_RESULT.md and .runtime/nfc-ab-a2-boot-summary.json. B not executed.
+
+## 2026-09-12 - Authorized A/B phase A1, legacy firmware
+
+- User required unchanged source code, hardware, wiring, I2C, phone and power setup, and explicitly authorized A only. Uploaded the existing legacy artifact (SHA-256 4695b8b862d2001603d754495e16e26872558d1aa5a2fb98ae79f1bd2c7e4d2e), without rebuilding; exit 0 and all four written segments verified.
+- Enabled the existing Android legacy option temporarily. Three embedded wallets were observed; first-wallet signer precheck remained pending and no challenge was sent. User initially had not pressed RESET, then confirmed pressing it during the renewed 10:07:14-10:09:14 UTC observation window. No recognized firmware markers or new HCE events were captured; COM4 closed on timeout. Raw UART bytes/unrecognized lines were not counted, so this does not prove zero received bytes or a PN532 initialization failure.
+- Result INCONCLUSIVE_BEFORE_NFC: INIT not observed; SELECT, exchange and proof check not reached. Cannot classify common transport versus dynamic-specific cause. Restored Android legacy mode OFF, closed capture, left legacy firmware installed. B not executed. No source changes, recompilation, blockchain writes or authorization commands. Evidence and limits: NFC_AB_A1_RESULT.md and .runtime/nfc-ab-a1-result.json.
+
+## 2026-09-12 - Controlled dynamic NFC transport diagnosis
+
+- User requires keeping existing cables and I2C; HSU migration is rejected. Compared the exact flashed diagnostic build cache (binary SHA matches ce1bbe...) against the first dynamic build: PN532, PN532_I2C and Wire object files, sdkconfig and build options are identical. Startup code through the failing address probe is identical to committed Gate E. This narrows changes but does not establish root cause or exclude a diagnostic application regression. Evidence: .runtime/pn532-build-comparison.json. Keep earlier SEND_CHALLENGE failure separate from latest startup failure; no byte-size change can explain an address-only probe failure. No new flash or firmware edit performed.
+
+- User requested an upstream-backed alternative rather than reinstalling earlier failing firmware. Reviewed Elechouse, Seeed Android HCE/HSU, Adafruit and jef-sure ESP-IDF sources; findings and source links are in .runtime/pn532-upstream-research.md. Adafruit unmodified APDU limit is 62 bytes versus our 109; Seeed I2C retains the local HAL error-handling patterns. Proposed evaluating pinned Seeed HSU as the closest Android HCE reference, not a validated solution. No firmware was built/flashed and no interface or APDU size changed; previous startup comparison was not executed.
+
+- After user-confirmed power cycling, a second internal-diagnostic attempt at 09:14:53Z again stopped at INITIALIZATION (no I2C ACK at 0x24), with zero Android HCE events and COM4 released. Evidence: .runtime/pn532-powercycle-result.json. Source review confirms the diagnostic class inherits begin/wakeup unchanged and failure precedes its write/read overrides; this does not fully rule out firmware/build issues. The user subsequently confirmed wiring and the I2C selector appear unchanged and firm. Prepared a startup comparison with the previously flashed APDU-status artifact (SHA-256 d3317cd06edd7b6b76d227602a65e54f10eeed6fff3ddfeb9725a980633fdf28); hash verified, monitor idle, upload awaits authorization. No new flash or phone tap performed. Handoff: .runtime/pn532-startup-comparison-handoff.json.
+
+- First internal-diagnostic attempt at 09:09:27Z stopped during initialization: PN532 did not ACK at I2C address 0x24. No Android HCE events or credential discovery occurred. The monitor closed COM4 and denied with TRANSPORT_FAILURE. Evidence: .runtime/pn532-internal-initialization-result.json. This is a new startup failure and does not identify the previous SEND_CHALLENGE cause; physical reader power/cabling must be checked before another NFC attempt.
+
+- The user authorized and completed firmware flashing through the agent on COM4 (ESP32-S3 revision v0.2). The dynamic build and later APDU-status diagnostic build both uploaded with written hashes verified. No blockchain writes or resource-policy changes occurred.
+- Read-only preflight at block 11687656 confirmed staff-001.keys.demo-access.eth is registered to holder 0x3419148731087b970d2059C53780163B452D5FF7, access.v1 Allowed, resources.v1 missing. The intended policy outcome remains RESOURCE_POLICY_MISSING; that end-to-end physical outcome has not been reached.
+- Added debug-only Android RX/TX/status/deactivation metadata, excluding APDU bodies, nonces, proof bytes and provider errors. The installed diagnostic APK passed 246 Android tests and assembly. Node remains 224/224.
+- Two paired Android/PN532 captures reproduced: SELECT and GET_CREDENTIAL return 9000 with the correct STAFF name; Node validates discovery and sends the Lab challenge; PN532 reports ISO-DEP exchange failure, while SEND_CHALLENGE never reaches the application HCE service. No holder proof was received. Local evidence: .runtime/android-pn532-paired-result.json and .runtime/android-pn532-paired-retry-result.json.
+- A measured phone clock lag of roughly 0.8 seconds remains a separate possible TTL issue; these captures do not demonstrate an Android TTL rejection. TTL, resource checks and wallet binding were not changed.
+- Historical byte-size review: Gate D/E records successful transport of the full 104-byte challenge (109-byte APDU) and 67-byte signature response. The reader uses a 128-byte Wire buffer and reserves an extra byte for the PN532 status in receive buffers. No committed evidence was found of reducing the 104-byte challenge; D-015 explicitly preserves it without chunking.
+- Prepared internal PN532 diagnostics using transparent overrides of the installed HAL write/read calls, printing only counts, return codes and the controller status after the exchange. New diagnostic artifact: .runtime/firmware-dynamic-pn532-trace/pn532_dynamic_access.ino.bin, SHA-256 ce1bbe0020eb9a667c983c34d46d0f1d33c321250062875a7141823ad04c06b6. The user explicitly authorized this internal-diagnostic build; it was flashed on COM4 at 2026-09-12T09:07Z with exit 0 and every written hash verified. The observer was restarted with internal-code capture enabled. All new work remains uncommitted.
+
+## 2026-09-12 - Dynamic selected-pass NFC and resource-aware virtual gates
+
+- Completed the authorized Studio-only checkpoint as `20c2dd9866f8c48bc0611dee34b9b272906a3429`; pushed and fetched origin, verified clean HEAD/origin equality and ahead/behind 0/0 before NFC edits. Recorded this as NFC_BASELINE_SHA. All subsequent implementation changes remain uncommitted.
+- Reconstructed Android HCE/Privy/selection, Node challenge/ENS/Gate E, firmware framing, timing and fixture dependencies before editing. Reused the existing AID, 104-byte credential/resource/nonce/expiry body, EIP-712 scheme and bounded controller-confirmation state machine.
+- Added shared public resource IDs and canonical `resources.v1`; integrated editable Studio presets, TX2, resource management, exact transaction recovery and final readback. The adversarial review caught and fixed nullable presentation-field recovery for the new management action.
+- Connected freshly validated selected-pass state to dynamic HCE and the captured active wallet. Added GET_CREDENTIAL and guarded firmware discovery without silent legacy fallback. Added independent exact hierarchy/provenance preflight and final current owner/access/resources verification with coherent block/freshness checks, replay consumption, and immutable current-session resource selection.
+- Built a loopback plain-HTML Gate Monitor and deterministic simulated matrix. Shared Android/Node/APDU/serial vectors use synthetic offline signatures only. Added adverse wallet/selection changes, resource/credential substitution, malformed policies, TOCTOU, concurrent replay, stale/reorged state, late discovery and controller-timeout coverage.
+- Final Android JVM tests 244/244 and debug assembly PASS; final APK installed on Seeker with adb install -r. Node tests 224/224 PASS. Both ESP32-S3 builds PASS (dynamic program 305441 bytes; legacy 305033 bytes). Firmware protocol fixtures PASS; no separate native firmware suite exists. Diff checks PASS.
+- Read-only production verification at Sepolia block 11687400 found existing staff REGISTERED with missing resources.v1, yielding RESOURCE_POLICY_MISSING. No real credential or policy was changed. Zero real wallet signatures, transactions, credential creations, or firmware flashes occurred.
+- Dynamic physical tap and rendered browser QA remain pending; no browser surface was available. HTTP/state tests pass. The runbook provides exact build/flash artifacts and a separately authorized physical-proof sequence; controller confirmation is serial only, without a relay/actuator claim.
+
 ## 2026-09-12 - Studio safety checkpoint validation
 
 - Reviewed the complete Studio worktree diff, including transaction coordination, persistence migration, UI, and adversarial fixtures. Changes are scoped to Studio and its shared transaction safeguards; secret-pattern matches are deliberately fake test inputs.

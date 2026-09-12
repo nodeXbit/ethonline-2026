@@ -1,6 +1,21 @@
 # Decisions
 
+## 2026-09-12 - Preserve the physically validated dynamic reference
+
+Checkpoint selected-pass Dynamic NFC and virtual resources before Pixel Reader or animation work. Physical STAFF/Lab denial with RESOURCE_POLICY_MISSING is a completed authorization flow, not a transport failure. Keep resource permissions fail-closed; do not add resources.v1 during checkpointing. Preserve SDA recovery and IRQ diagnostics without claiming SCL stability. Retain the reference firmware hash, sanitized evidence and diagnostic patches; ignore generated artifacts. Keep ten-minute monitor preparation separate from unchanged credential/proof freshness checks. Pixel Reader fallback remains unimplemented.
+
+
 Accepted product and architecture decisions for ETHOnline 2026.
+
+## D-026 - Bind dynamic selected-pass proof to explicit resources
+
+Accepted 2026-09-12. Extend the existing HCE v1 AID with bounded GET_CREDENTIAL discovery and reuse its 104-byte challenge/EIP-712 proof. Publish only freshly validated selected-pass ownership for the active wallet; latch wallet/provider, credential and chain for the session and fail closed on changes. Keep the old NFC path explicitly selectable in diagnostics, with no automatic fallback from dynamic mode.
+
+Keep resource IDs in public shared configuration, derived from `lockens:resource:v1:<slug>`. S1 `resources.v1` contains a canonical sorted unique known-ID bytes32 array; missing, empty or malformed data never grants access. `access.v1` remains an independent global gate. Studio uses its existing guarded issuance/management engine for reviewed resource changes.
+
+Node treats discovered names as untrusted, verifies exact ENS hierarchy/provenance before challenge issuance, then rereads current owner and policy in a fresh coherent snapshot after proof. Reuse Gate E timing, single-use challenges and exact controller confirmation. A virtual gate is latched before discovery; UI changes affect only the next session. The monitor must not show a grant without serial confirmation and must not imply a real actuator.
+
+This implements the direction in D-024. Software tests and both firmware builds pass; dynamic flash/tap and browser-render validation remain pending. Existing staff's missing resource policy is preserved and denies. New work is uncommitted after the authorized Studio baseline; see DYNAMIC_NFC_RUNBOOK.md.
 
 ## D-025 - Preserve Studio transaction identity across asynchronous work
 

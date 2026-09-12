@@ -1,5 +1,21 @@
 # Project
 
+## Physical NFC checkpoint - 2026-09-12
+
+Dynamic NFC works physically end-to-end with `staff-001.keys.demo-access.eth` and virtual gate **Lab**. The authorized tap at 13:43:43-13:43:47 UTC completed discovery, the 109-byte challenge APDU, the 67-byte signature APDU response, the 65-byte holder proof, fresh authoritative verification and serial controller confirmation. Final decision: **ACCESS DENIED / RESOURCE_POLICY_MISSING**. Existing STAFF has no `resources.v1`; no resource policy was written. This is an authorization decision, not a transport failure.
+
+One physical ESP32-S3/PN532 verifier simulates Front Door, Lab and Server Room. There is **no physical lock/relay actuator**. Pixel/Android Gate Reader fallback and monitor-animation work are **not implemented**.
+
+PN532/I2C boot stability is **not fully characterized**. SDA recovery passed repeatedly; a ten-pass series was followed by a SCL/SAM failure. Later IRQ instrumentation has not reproduced that fault. Neither the electrical cause nor prolonged stability is established. The negative-length library defect remains unfixed.
+
+Reference firmware: `.runtime/firmware-irq-cause/pn532_dynamic_access.ino.bin`, SHA-256 `4914015019c3659de25fd13d55ccb314b09ac4b0dfd7667f5407874e9b08ed9e`. Current-source recompilation reproduced that hash. Ignored binaries remain local; diagnostic patches and source fingerprints are preserved in [firmware/diagnostics](firmware/diagnostics/README.md).
+
+Checkpoint validation: **246 Android unit tests**, **229 Node tests**, `assembleDebug`, dynamic and legacy firmware builds, and the standalone Gate Monitor test pass. The monitor test is included in the Node total. The rebuilt APK matches the installed APK: `45004d6ecd239cb1ac317dc9f684cfdc4bb3182e06ac527f67c11b11b00ce909`; no APK installation is needed.
+
+See [checkpoint audit](PHYSICAL_NFC_CHECKPOINT.md), [sanitized physical evidence](docs/evidence/physical-nfc-2026-09-12.json), [test coordination](NFC_TEST_COORDINATION.md), and [boot/IRQ limitations](NFC_IRQ_CAUSE_INVESTIGATION.md). Checkpoint work performs no blockchain writes, real-wallet signatures, firmware flashes, credential changes, or new physical taps. Offline synthetic test cryptography is distinct from wallet signing; committed fixtures contain no serialized signatures.
+
+## Project context
+
 - Goal: build a valid, functional, deployed, and explainable ETHGlobal prototype that connects an ENSv2-managed digital access credential to a physical NFC interaction.
 - Problem: owners and operators of physical spaces need a simple way to grant temporary access with authoritative credential state that is open, inspectable, and easy to update.
 - Initial user: the owner or operator of a physical space granting temporary access.

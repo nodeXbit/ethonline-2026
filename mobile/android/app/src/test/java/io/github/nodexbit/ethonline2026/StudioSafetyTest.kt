@@ -327,7 +327,8 @@ class StudioSafetyTest {
             assertEquals(session.holder, migrated.holder)
             assertEquals(session.expiry, migrated.expiry)
             assertEquals("historical-register", migrated.registerOperationId)
-            assertEquals(18, store.value!!.split('|').size)
+            assertEquals(19, store.value!!.split('|').size)
+            assertNull(migrated.allowedResources)
         }
     }
 

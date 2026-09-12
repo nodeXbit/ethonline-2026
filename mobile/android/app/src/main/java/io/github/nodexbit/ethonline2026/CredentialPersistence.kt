@@ -84,6 +84,7 @@ data class IssuanceSession(
     val acknowledgedOwner: String? = null,
     val acknowledgedRoles: BigInteger? = null,
     val acknowledgedTransferable: Boolean? = null,
+    val allowedResources: Set<String>? = null,
 ) {
     val identity: IssuanceIdentity get() = IssuanceIdentity(wallet.lowercase(), fullName, sessionId, IssuerSpace.chainId)
     val configurationOwner: String get() = acknowledgedOwner ?: holder
@@ -143,6 +144,7 @@ class IssuanceCoordinator(private val store: LoadableStringStateStore) {
             accessValidUntil = draft.accessValidUntil,
             transferable = draft.transferable,
             roleBitmap = draft.roleBitmap,
+            allowedResources = draft.allowedResources,
         ),
     )
 
@@ -302,6 +304,7 @@ class IssuanceCoordinator(private val store: LoadableStringStateStore) {
         value.transferable.toString(), value.roleBitmap.toString(), value.sessionId,
         value.acknowledgedOwner.orEmpty(), value.acknowledgedRoles?.toString().orEmpty(),
         value.acknowledgedTransferable?.toString().orEmpty(),
+        value.allowedResources?.let(AccessResources::encode).orEmpty(),
     ).joinToString("|") { escape(it) }
 
     private fun decodeAll(raw: String?): List<IssuanceSession> = raw.orEmpty().lineSequence()
@@ -311,7 +314,7 @@ class IssuanceCoordinator(private val store: LoadableStringStateStore) {
 
     private fun decode(raw: String): IssuanceSession? {
         val fields = raw.split('|').map(::unescape)
-        if (fields.size !in setOf(9, 14, 18)) return null
+        if (fields.size !in setOf(9, 14, 18, 19)) return null
         return runCatching {
             IssuanceSession(
                 fields[0], fields[1], fields[2], BigInteger(fields[3]), fields[4], fields[5],
@@ -325,6 +328,7 @@ class IssuanceCoordinator(private val store: LoadableStringStateStore) {
                 acknowledgedOwner = fields.getOrNull(15)?.takeIf(String::isNotBlank),
                 acknowledgedRoles = fields.getOrNull(16)?.takeIf(String::isNotBlank)?.let(::BigInteger),
                 acknowledgedTransferable = fields.getOrNull(17)?.takeIf(String::isNotBlank)?.toBooleanStrict(),
+                allowedResources = fields.getOrNull(18)?.takeIf(String::isNotBlank)?.let(AccessResources::decode),
             )
         }.getOrNull()
     }

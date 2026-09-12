@@ -9,6 +9,11 @@ import io.github.nodexbit.ethonline2026.hce.HceApduProcessor
 import io.github.nodexbit.ethonline2026.hce.PrivyProofProvider
 import io.github.nodexbit.ethonline2026.hce.PrivyTypedDataSignerSource
 import io.github.nodexbit.ethonline2026.hce.TypedDataSignerSource
+import io.github.nodexbit.ethonline2026.hce.PrivyTypedDataSigner
+import io.github.nodexbit.ethonline2026.hce.NfcSelectionState
+import io.github.nodexbit.ethonline2026.hce.HceIdentity
+import io.github.nodexbit.ethonline2026.hce.PendingProofProvider
+import io.privy.wallet.ethereum.EmbeddedEthereumWallet
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,6 +30,23 @@ class GateBApplication : Application() {
 
     lateinit var hceProcessor: HceApduProcessor
         private set
+    val nfcSelection = NfcSelectionState()
+    val dynamicHceProcessor = HceApduProcessor(PendingProofProvider, nfcSelection::current)
+    var legacyNfcEnabled = false
+        set(value) { dynamicHceProcessor.reset(); if (::hceProcessor.isInitialized) hceProcessor.reset(); field = value }
+    val physicalHceProcessor: HceApduProcessor get() = if (legacyNfcEnabled) hceProcessor else dynamicHceProcessor
+
+    fun publishNfc(wallet: EmbeddedEthereumWallet, selected: String?, owned: List<CredentialSnapshot>) {
+        val binding = StudioRuntime.writes.currentWallet() ?: return nfcSelection.clear()
+        if (!binding.address.equals(wallet.address, true)) return nfcSelection.clear()
+        var published: HceIdentity? = null
+        val provider = PrivyProofProvider(CoroutineAsyncRunner(applicationScope), TypedDataSignerSource {
+            if (published == null || nfcSelection.current() !== published) null
+            else PrivyTypedDataSigner(wallet)
+        })
+        nfcSelection.publish(binding, selected, owned, provider)
+        published = nfcSelection.current()
+    }
 
     override fun onCreate() {
         super.onCreate()
