@@ -202,7 +202,7 @@ object ProductShellPolicy {
     }
 
     fun identityLabel(address: String, issuerCapability: Boolean): String =
-        "${if (issuerCapability) "Issuer" else "Holder"} · ${compactAddress(address)}"
+        WalletCapabilityPresentation.identity(address)
 
     fun staffReview(avatarUri: String): StaffReviewPresentation = StaffReviewPresentation(
         credential = IssuerSpace.fullName,

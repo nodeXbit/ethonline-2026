@@ -60,6 +60,15 @@ class ReadOnlyRpcException(
     message: String,
 ) : IllegalStateException(message)
 
+data class EthereumLog(
+    val address: String,
+    val blockNumber: java.math.BigInteger,
+    val transactionHash: String,
+    val logIndex: java.math.BigInteger,
+    val topics: List<String>,
+    val data: String,
+)
+
 fun interface ReadOnlyRpcTransport {
     suspend fun post(requestBody: String, maxResponseBytes: Int): String
 }
@@ -237,6 +246,35 @@ class ReadOnlyEthereumRpcClient(
         call("eth_estimateGas", listOf(call)),
     )
 
+    suspend fun logs(
+        address: String,
+        fromBlock: java.math.BigInteger,
+        toBlock: java.math.BigInteger,
+        topic0: String,
+        maxLogs: Int = 500,
+    ): List<EthereumLog> {
+        if (!ADDRESS.matches(address)) throw ReadOnlyRpcException("INVALID_LOG_ADDRESS", "Invalid log address")
+        if (fromBlock.signum() < 0 || toBlock < fromBlock || toBlock - fromBlock > MAX_LOG_BLOCK_RANGE) {
+            throw ReadOnlyRpcException("INVALID_LOG_RANGE", "Log range is outside the bounded policy")
+        }
+        if (!HASH.matches(topic0)) throw ReadOnlyRpcException("INVALID_LOG_TOPIC", "Invalid log topic")
+        if (maxLogs !in 1..MAX_LOG_RESULTS) {
+            throw ReadOnlyRpcException("INVALID_LOG_LIMIT", "Invalid log result limit")
+        }
+        val filter = ReadOnlyJsonValue.ObjectValue(linkedMapOf(
+            "address" to string(address.lowercase()),
+            "fromBlock" to string(blockQuantity(fromBlock)),
+            "toBlock" to string(blockQuantity(toBlock)),
+            "topics" to ReadOnlyJsonValue.ArrayValue(listOf(string(topic0.lowercase()))),
+        ))
+        val result = call("eth_getLogs", listOf(filter)) as? ReadOnlyJsonValue.ArrayValue
+            ?: throw ReadOnlyRpcException("UNEXPECTED_RESULT_TYPE", "Public RPC logs result was not an array")
+        if (result.values.size > maxLogs) {
+            throw ReadOnlyRpcException("LOG_RESULT_LIMIT", "Public RPC logs exceeded the bounded policy")
+        }
+        return result.values.map(::ethereumLog)
+    }
+
     suspend fun rawStringParams(method: String, params: List<String>): String =
         call(method, params.map(::string)).toJson()
 
@@ -272,6 +310,38 @@ class ReadOnlyEthereumRpcClient(
         return value
     }
 
+    private fun blockQuantity(value: java.math.BigInteger): String = "0x${value.toString(16)}"
+
+    private fun ethereumLog(value: ReadOnlyJsonValue): EthereumLog {
+        val fields = (value as? ReadOnlyJsonValue.ObjectValue)?.fields
+            ?: throw ReadOnlyRpcException("MALFORMED_LOG", "Public RPC returned a malformed log")
+        fun field(name: String): String = (fields[name] as? ReadOnlyJsonValue.StringValue)?.value
+            ?: throw ReadOnlyRpcException("MALFORMED_LOG", "Public RPC returned a malformed log")
+        val address = field("address")
+        val transactionHash = field("transactionHash")
+        val data = field("data")
+        val topics = (fields["topics"] as? ReadOnlyJsonValue.ArrayValue)?.values?.map {
+            (it as? ReadOnlyJsonValue.StringValue)?.value
+                ?: throw ReadOnlyRpcException("MALFORMED_LOG", "Public RPC returned a malformed log")
+        } ?: throw ReadOnlyRpcException("MALFORMED_LOG", "Public RPC returned a malformed log")
+        if (!ADDRESS.matches(address) || !HASH.matches(transactionHash) || !DATA.matches(data) ||
+            topics.isEmpty() || topics.any { !HASH.matches(it) }
+        ) throw ReadOnlyRpcException("MALFORMED_LOG", "Public RPC returned a malformed log")
+        return EthereumLog(
+            address = address,
+            blockNumber = rpcQuantity(field("blockNumber")),
+            transactionHash = transactionHash,
+            logIndex = rpcQuantity(field("logIndex")),
+            topics = topics,
+            data = data,
+        )
+    }
+
+    private fun rpcQuantity(value: String): java.math.BigInteger {
+        if (!QUANTITY.matches(value)) throw ReadOnlyRpcException("MALFORMED_LOG", "Public RPC returned a malformed log")
+        return java.math.BigInteger(value.drop(2), 16)
+    }
+
     companion object {
         const val PUBLIC_SEPOLIA_RPC = "https://ethereum-sepolia-rpc.publicnode.com"
         val ALLOWED_METHODS = setOf(
@@ -283,10 +353,15 @@ class ReadOnlyEthereumRpcClient(
             "eth_getBlockByNumber",
             "eth_call",
             "eth_estimateGas",
+            "eth_getLogs",
         )
         private val HASH = Regex("^0x[0-9a-fA-F]{64}$")
+        private val ADDRESS = Regex("^0x[0-9a-fA-F]{40}$")
+        private val DATA = Regex("^0x(?:[0-9a-fA-F]{2})*$")
         private val QUANTITY = Regex("^0x(?:0|[1-9a-fA-F][0-9a-fA-F]*)$")
         private val BLOCK_TAGS = setOf("latest", "pending", "safe", "finalized", "earliest")
+        private val MAX_LOG_BLOCK_RANGE = java.math.BigInteger.valueOf(100_000L)
+        private const val MAX_LOG_RESULTS = 1_000
 
         private fun sanitizeMessage(message: String?): String? {
             val normalized = message

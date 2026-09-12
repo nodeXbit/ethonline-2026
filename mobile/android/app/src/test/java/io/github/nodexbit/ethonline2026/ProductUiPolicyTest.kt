@@ -29,8 +29,8 @@ class ProductUiPolicyTest {
         val issuer = ProductShellPolicy.destinations(authenticated = true, issuerCapability = true)
         assertFalse(ProductDestination.ISSUER in holder)
         assertTrue(ProductDestination.ISSUER in issuer)
-        assertEquals("Issuer · 0xFa90…2685", ProductShellPolicy.identityLabel(IssuerSpace.issuer, true))
-        assertEquals("Holder · 0x3419…5FF7", ProductShellPolicy.identityLabel(IssuerSpace.STAFF_HOLDER, false))
+        assertEquals("Active wallet · 0xFa90…2685", ProductShellPolicy.identityLabel(IssuerSpace.issuer, true))
+        assertEquals("Active wallet · 0x3419…5FF7", ProductShellPolicy.identityLabel(IssuerSpace.STAFF_HOLDER, false))
     }
 
     @Test

@@ -1,6 +1,7 @@
 package io.github.nodexbit.ethonline2026
 
 import java.math.BigInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -36,11 +37,13 @@ data class CredentialSnapshot(
 }
 
 data class IssuerCapability(
-    val allowed: Boolean,
+    val state: IssuerCapabilityState,
     val category: String,
     val snapshotBlock: BigInteger? = null,
     val namespaceExpiry: BigInteger? = null,
-)
+) {
+    val allowed: Boolean get() = state == IssuerCapabilityState.ALLOWED
+}
 
 object IssuerAuthorityPolicy {
     fun evaluate(
@@ -69,9 +72,9 @@ object IssuerAuthorityPolicy {
             else -> null
         }
         return if (category == null) {
-            IssuerCapability(true, "CONFIRMED_ONCHAIN", blockNumber, namespaceExpiry)
+            IssuerCapability(IssuerCapabilityState.ALLOWED, "CONFIRMED_ONCHAIN", blockNumber, namespaceExpiry)
         } else {
-            IssuerCapability(false, category, blockNumber, namespaceExpiry)
+            IssuerCapability(IssuerCapabilityState.DENIED, category, blockNumber, namespaceExpiry)
         }
     }
 }
@@ -122,7 +125,11 @@ object CredentialProductPolicy {
     fun ownedBy(snapshot: CredentialSnapshot, wallet: String): Boolean =
         snapshot.readStatus == CredentialReadStatus.FRESH &&
             snapshot.status == CredentialRegistryStatus.REGISTERED &&
-            snapshot.owner.equals(wallet, true)
+            snapshot.owner.equals(wallet, true) &&
+            snapshot.registry.equals(IssuerSpace.registry, true) &&
+            snapshot.resolver.equals(IssuerSpace.resolver, true) &&
+            snapshot.subregistry.equals(IssuerSpace.ZERO_ADDRESS, true) &&
+            snapshot.provenanceMatches
 }
 
 object CredentialRecordDecoding {
@@ -265,12 +272,15 @@ class CredentialReader(private val client: ReadOnlyEthereumRpcClient) {
                 )
             }
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             unknown(fullName, safeCategory(error))
         }
     }
 
     suspend fun issuerCapability(account: String): IssuerCapability {
-        if (!account.equals(IssuerSpace.issuer, true)) return IssuerCapability(false, "NOT_CONFIGURED_ISSUER")
+        if (!account.equals(IssuerSpace.issuer, true)) {
+            return IssuerCapability(IssuerCapabilityState.DENIED, "NOT_CONFIGURED_ISSUER")
+        }
         return try {
             require(client.chainId() == BigInteger.valueOf(IssuerSpace.chainId)) { "WRONG_CHAIN" }
             val block = client.blockByNumber("latest", false) ?: error("LATEST_BLOCK_MISSING")
@@ -295,7 +305,8 @@ class CredentialReader(private val client: ReadOnlyEthereumRpcClient) {
                 resolver, expiry, timestamp, blockNumber,
             )
         } catch (error: Throwable) {
-            IssuerCapability(false, safeCategory(error))
+            if (error is CancellationException) throw error
+            IssuerCapability(IssuerCapabilityState.UNAVAILABLE, safeCategory(error))
         }
     }
 

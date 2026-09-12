@@ -35,6 +35,7 @@ object IssuerSpace {
     val registryImplementation: String get() = BuildConfig.USER_REGISTRY_IMPLEMENTATION
     val resolverImplementation: String get() = BuildConfig.PERMISSIONED_RESOLVER_IMPLEMENTATION
     val namespaceExpiry: Long get() = BuildConfig.ISSUER_NAMESPACE_EXPIRY
+    val registryDeploymentBlock: Long get() = BuildConfig.ISSUER_REGISTRY_DEPLOYMENT_BLOCK
     val registryRootRoles: BigInteger get() = Numeric.toBigInt(BuildConfig.ISSUER_REGISTRY_ROOT_ROLES)
     val resolverRootRoles: BigInteger get() = Numeric.toBigInt(BuildConfig.ISSUER_RESOLVER_ROOT_ROLES)
     val fullName: String get() = "$STAFF_LABEL.$namespace"

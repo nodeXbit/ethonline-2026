@@ -2,9 +2,31 @@
 
 ## Current objective
 
-FIRST CREDENTIAL VERTICAL: PASS.
+WALLET EXPERIENCE FOUNDATION: PASS.
 
-The first Android-issued credential, `staff-001.keys.demo-access.eth`, is confirmed on Sepolia and the holder physically validated it in My Keys. The Android issuance state is `READY`; the existing `guest-001` physical fallback remains unchanged.
+The Android wallet foundation is physically validated with one Privy session, multiple embedded wallets, explicit active-wallet selection, wallet-partitioned My Keys, automatic R1 discovery, selected-pass persistence, and active-wallet issuer capability. The first Android-issued credential, `staff-001.keys.demo-access.eth`, remains confirmed on Sepolia; the existing `guest-001` physical fallback remains unchanged.
+
+## Wallet experience foundation checkpoint
+
+- Privy session restoration has no Login flash, and switching embedded wallets does not require logout.
+- Active-wallet selection works across multiple wallets under one Privy user and survives restart.
+- My Keys is partitioned by active wallet. `staff-001` is automatically discovered from R1 only for its current onchain owner, disappears for a non-owner wallet, and returns when switching back.
+- Selected-pass state survives restart and is scoped by wallet plus chain.
+- Issuer capability is recalculated for the active wallet.
+- Physical validation performed zero blockchain writes and created no wallet automatically.
+- Final checkpoint validation: Android JVM tests 157/157 PASS, Node tests 173/173 PASS, Android debug assembly PASS, and `git diff --check` PASS.
+
+## NEXT UI work
+
+- Compact active-wallet selector/dropdown in Settings.
+- Inline copy-address affordance.
+- `+ Create new wallet` inside the wallet picker.
+- Sepolia Testnet network presentation with Ethereum/network icon.
+- Real credential artwork rendering.
+- Full-card artwork treatment.
+- Pass stack physical validation once multiple real credentials exist.
+
+These items are explicitly deferred and are not part of the wallet-foundation checkpoint.
 
 ## Staff credential vertical implementation
 

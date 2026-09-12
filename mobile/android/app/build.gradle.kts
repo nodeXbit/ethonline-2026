@@ -20,6 +20,10 @@ fun issuerConfigString(name: String): String =
 fun issuerRoleString(name: String): String =
     "\"${((issuerSpaceConfig["roles"] as? Map<*, *>)?.get(name) ?: error("Missing issuer role: $name"))}\""
 
+fun issuerBootstrapLong(name: String): Long =
+    ((issuerSpaceConfig["bootstrap"] as? Map<*, *>)?.get(name) as? Number)?.toLong()
+        ?: error("Missing issuer bootstrap config: $name")
+
 fun localBuildConfigString(name: String): String {
     val value = privyLocalProperties.getProperty(name, "")
         .replace("\\", "\\\\")
@@ -57,6 +61,7 @@ android {
         buildConfigField("long", "ISSUER_NAMESPACE_EXPIRY", "${issuerSpaceConfig["namespaceExpiry"]}L")
         buildConfigField("String", "ISSUER_REGISTRY_ROOT_ROLES", issuerRoleString("issuerRegistryRoot"))
         buildConfigField("String", "ISSUER_RESOLVER_ROOT_ROLES", issuerRoleString("issuerResolverRoot"))
+        buildConfigField("long", "ISSUER_REGISTRY_DEPLOYMENT_BLOCK", "${issuerBootstrapLong("r1DeploymentBlock")}L")
     }
 
     compileOptions {

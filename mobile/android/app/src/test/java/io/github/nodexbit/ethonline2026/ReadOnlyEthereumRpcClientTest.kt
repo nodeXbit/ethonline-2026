@@ -171,6 +171,44 @@ class ReadOnlyEthereumRpcClientTest {
     }
 
     @Test
+    fun `eth_getLogs is read only allowlisted with a strict bounded filter`() = runBlocking {
+        var request = ""
+        val client = ReadOnlyEthereumRpcClient(
+            transport = ReadOnlyRpcTransport { body, _ ->
+                request = body
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":[]}"
+            },
+        )
+        val logs = client.logs(
+            address = ADDRESS,
+            fromBlock = BigInteger.TEN,
+            toBlock = BigInteger.valueOf(20),
+            topic0 = HASH,
+        )
+        assertTrue(logs.isEmpty())
+        assertTrue(request.contains("\"method\":\"eth_getLogs\""))
+        assertTrue(request.contains("\"fromBlock\":\"0xa\""))
+        assertTrue(request.contains("\"toBlock\":\"0x14\""))
+        assertTrue(request.contains(ADDRESS.lowercase()))
+    }
+
+    @Test
+    fun `eth_getLogs rejects unbounded ranges and malformed filters before transport`() {
+        var calls = 0
+        val client = ReadOnlyEthereumRpcClient(transport = ReadOnlyRpcTransport { _, _ ->
+            calls += 1
+            error("unreachable")
+        })
+        assertThrows(ReadOnlyRpcException::class.java) {
+            runBlocking { client.logs(ADDRESS, BigInteger.ZERO, BigInteger.valueOf(100_001), HASH) }
+        }
+        assertThrows(ReadOnlyRpcException::class.java) {
+            runBlocking { client.logs("not-an-address", BigInteger.ZERO, BigInteger.ONE, HASH) }
+        }
+        assertEquals(0, calls)
+    }
+
+    @Test
     fun `endpoint must be HTTPS and contain no credentials or metadata`() {
         val insecure = assertThrows(IllegalArgumentException::class.java) {
             HttpsReadOnlyRpcTransport("http://example.invalid")
@@ -209,5 +247,6 @@ class ReadOnlyEthereumRpcClientTest {
 
     companion object {
         private const val HASH = "0x6c4f42f2d368936d4aaf7edf3e0395c376f92b699563b34fee4ed053a0a53e32"
+        private const val ADDRESS = "0x0AeB395be893149c0b60D9DAC3Ba55139D0dcA1a"
     }
 }

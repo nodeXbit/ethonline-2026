@@ -28,6 +28,9 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import java.math.BigInteger
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import io.privy.auth.PrivyUser
 import io.privy.wallet.ethereum.EmbeddedEthereumWallet
 import io.privy.wallet.ethereum.EthereumChain
@@ -74,6 +77,8 @@ class MainActivity : Activity() {
     private lateinit var resumeSetupButton: Button
     private lateinit var copyCredentialButton: Button
     private lateinit var loggedOutView: LinearLayout
+    private lateinit var restoringView: LinearLayout
+    private lateinit var restoringStatusText: TextView
     private lateinit var authenticatedView: LinearLayout
     private lateinit var navigationBar: LinearLayout
     private lateinit var productScrollView: ScrollView
@@ -86,6 +91,9 @@ class MainActivity : Activity() {
     private lateinit var actionFailureText: TextView
     private lateinit var shellIdentityText: TextView
     private lateinit var settingsIdentityText: TextView
+    private lateinit var walletsList: LinearLayout
+    private lateinit var capabilityStatusText: TextView
+    private lateinit var createWalletButton: Button
     private lateinit var shellFeedbackText: TextView
     private lateinit var loginFeedbackText: TextView
     private lateinit var myKeysNavButton: Button
@@ -93,6 +101,7 @@ class MainActivity : Activity() {
     private lateinit var settingsNavButton: Button
     private var currentDestination = ProductDestination.MY_KEYS
     private var issuerCapabilityConfirmed = false
+    private var issuerCapabilityState = IssuerCapabilityState.UNAVAILABLE
     private var lastActionFailure: SafeActionFailure? = null
     private var currentUser: PrivyUser? = null
     private var ethereumWallet: EmbeddedEthereumWallet? = null
@@ -100,6 +109,10 @@ class MainActivity : Activity() {
     private var m1Runner: MobileIssuerAdmissionRunner? = null
     private var m1OperationId: String? = null
     private var contractRunner: ContractTransactionRunner? = null
+    private var authenticatedWallets: List<EmbeddedEthereumWallet> = emptyList()
+    private var lastOwnedCredentials: List<CredentialSnapshot> = emptyList()
+    private var lastCredentialRefreshAtMillis = 0L
+    private var credentialRefreshJob: Job? = null
     private val credentialRpcClient by lazy { ReadOnlyEthereumRpcClient() }
     private val credentialReader by lazy { CredentialReader(credentialRpcClient) }
     private val credentialFinalReadback by lazy {
@@ -125,6 +138,18 @@ class MainActivity : Activity() {
     }
     private val credentialIndex by lazy {
         sharedStringStore(CREDENTIAL_LOCAL_INDEX).let(::LocalCredentialIndex)
+    }
+    private val activeWalletStore by lazy {
+        sharedStringStore(ACTIVE_WALLET).let(::ActiveWalletStore)
+    }
+    private val selectedPassStore by lazy {
+        sharedStringStore(SELECTED_PASS).let(::SelectedPassStore)
+    }
+    private val credentialDiscovery by lazy {
+        CredentialDiscoveryService(
+            source = R1CredentialCandidateSource(credentialRpcClient),
+            read = credentialReader::read,
+        )
     }
     private val m1ReadinessGate = MobileIssuerReadinessGate()
     private var m1ReadinessJob: Job? = null
@@ -155,6 +180,7 @@ class MainActivity : Activity() {
         setContentView(buildContentView())
 
         if (!gateBApplication.isPrivyConfigured) {
+            showLoggedOutShell()
             setBusy(true)
             showStatus(
                 "Local Privy configuration is missing. Copy " +
@@ -165,15 +191,28 @@ class MainActivity : Activity() {
         }
 
         activityScope.launch {
-            currentUser = gateBApplication.privy.getUser()
-            if (currentUser == null) {
-                showHceSignerStatus("LOGIN REQUIRED")
-                showStatus("Ready for email login.")
-            } else {
-                showAuthenticatedShell()
-                showStatus("Existing authenticated session restored.")
-                reuseExistingWallet()
+            try {
+                currentUser = gateBApplication.privy.getUser()
+                if (currentUser == null) {
+                    showLoggedOutShell()
+                    showHceSignerStatus("LOGIN REQUIRED")
+                    showStatus("Ready for email login.")
+                } else {
+                    restoreAuthenticatedUser(currentUser!!, "Existing authenticated session restored.")
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                restoringStatusText.text = "Session restoration is temporarily unavailable. Reopen the app to retry."
             }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val wallet = ethereumWallet ?: return
+        if (System.currentTimeMillis() - lastCredentialRefreshAtMillis >= FOREGROUND_REFRESH_AGE_MILLIS) {
+            refreshProduct(wallet.address)
         }
     }
 
@@ -193,9 +232,22 @@ class MainActivity : Activity() {
             )
         }
 
+        restoringView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            addView(productTitle("ENS Access").apply { gravity = Gravity.CENTER }, matchWrapParams())
+            restoringStatusText = productBody("Restoring your secure session…").apply {
+                gravity = Gravity.CENTER
+                setPadding(0, dp(10), 0, 0)
+            }
+            addView(restoringStatusText, matchWrapParams())
+        }
+        content.addView(restoringView, matchWrapParams())
+
         loggedOutView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
+            visibility = View.GONE
         }
         loggedOutView.addView(productTitle("ENS Access"), matchWrapParams())
         loggedOutView.addView(productBody("Programmable credentials powered by ENS").apply {
@@ -281,7 +333,7 @@ class MainActivity : Activity() {
             setPadding(0, dp(8), 0, dp(14))
         }, matchWrapParams())
         importCredentialInput = productInput("credential.keys.demo-access.eth")
-        val importButton = productButton("Import credential", action = ::showImportCredentialDialog)
+        val importButton = productButton("Add by ENS name", action = ::showImportCredentialDialog)
         myKeysEmptyCard.addView(importButton, matchWrapParams())
         myKeysSection.addView(myKeysEmptyCard, cardParams())
         myKeysCards = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -290,7 +342,7 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             visibility = View.GONE
         }
-        val importAnotherButton = productButton("Import another", primary = false, action = ::showImportCredentialDialog)
+        val importAnotherButton = productButton("Add by ENS name", primary = false, action = ::showImportCredentialDialog)
         val refreshKeysButton = productButton("Refresh onchain", primary = false, action = ::refreshMyKeys)
         myKeysActions.addView(importAnotherButton, weightedParams())
         myKeysActions.addView(refreshKeysButton, weightedParams())
@@ -348,7 +400,7 @@ class MainActivity : Activity() {
         settingsSection.addView(sectionHeader("SETTINGS", "Account, network, and developer tools."), matchWrapParams())
         val accountCard = productCard()
         accountCard.addView(productCaption("ACCOUNT"), matchWrapParams())
-        accountCard.addView(productCaption("ACTIVE ACCOUNT"), matchWrapParams())
+        accountCard.addView(productCaption("ACTIVE WALLET"), matchWrapParams())
         settingsIdentityText = productBody("Wallet not ready").apply {
             setTextColor(textPrimaryColor())
             setTypeface(typeface, Typeface.BOLD)
@@ -365,8 +417,15 @@ class MainActivity : Activity() {
             isEnabled = false
         }
         accountCard.addView(copyWalletButton, matchWrapParams())
-        val walletButton = productButton("Create or reuse wallet", primary = false, action = ::createOrReuseWallet)
-        accountCard.addView(walletButton, matchWrapParams())
+        capabilityStatusText = productBody(WalletCapabilityPresentation.issuerLabel(IssuerCapabilityState.UNAVAILABLE)).apply {
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        accountCard.addView(capabilityStatusText, matchWrapParams())
+        accountCard.addView(productCaption("WALLETS").apply { setPadding(0, dp(16), 0, dp(6)) }, matchWrapParams())
+        walletsList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        accountCard.addView(walletsList, matchWrapParams())
+        createWalletButton = productButton("Create wallet", primary = false, action = ::createAnotherWallet)
+        accountCard.addView(createWalletButton, matchWrapParams())
         val logoutButton = productButton("Switch account / Log out", primary = false, action = ::logout)
         accountCard.addView(logoutButton, matchWrapParams())
         settingsSection.addView(accountCard, cardParams())
@@ -438,10 +497,10 @@ class MainActivity : Activity() {
 
         content.addView(authenticatedView, matchWrapParams())
         operationButtons = listOf(
-            sendCodeButton, loginButton, walletButton, logoutButton, importButton, importAnotherButton,
+            sendCodeButton, loginButton, createWalletButton, logoutButton, importButton, importAnotherButton,
             refreshKeysButton, signButton, hceTestButton,
         )
-        showLoggedOutShell()
+        showRestoringShell()
         productScrollView = ScrollView(this).apply {
             isFillViewport = true
             setBackgroundColor(pageColor())
@@ -678,13 +737,22 @@ class MainActivity : Activity() {
         productButton(textValue, primary = false, action = action)
 
     private fun showLoggedOutShell() {
+        restoringView.visibility = View.GONE
         loggedOutView.visibility = View.VISIBLE
         authenticatedView.visibility = View.GONE
         currentDestination = ProductDestination.MY_KEYS
         resetProductScroll()
     }
 
+    private fun showRestoringShell() {
+        restoringView.visibility = View.VISIBLE
+        loggedOutView.visibility = View.GONE
+        authenticatedView.visibility = View.GONE
+        resetProductScroll()
+    }
+
     private fun showAuthenticatedShell() {
+        restoringView.visibility = View.GONE
         loggedOutView.visibility = View.GONE
         authenticatedView.visibility = View.VISIBLE
         showDestination(ProductDestination.MY_KEYS)
@@ -716,6 +784,12 @@ class MainActivity : Activity() {
             issuerNavButton.setTextColor(if (destination == ProductDestination.ISSUER) Color.WHITE else textPrimaryColor())
             settingsNavButton.setTextColor(if (destination == ProductDestination.SETTINGS) Color.WHITE else textPrimaryColor())
         }
+        if (destination == ProductDestination.MY_KEYS) {
+            val wallet = ethereumWallet
+            if (wallet != null && System.currentTimeMillis() - lastCredentialRefreshAtMillis >= MY_KEYS_REFRESH_AGE_MILLIS) {
+                refreshMyKeysAsync(wallet.address)
+            }
+        }
     }
 
     private fun resetProductScroll() {
@@ -736,7 +810,7 @@ class MainActivity : Activity() {
             addView(input, matchWrapParams())
         }
         AlertDialog.Builder(this)
-            .setTitle("Import credential")
+            .setTitle("Add by ENS name")
             .setView(container)
             .setNegativeButton("Back", null)
             .setPositiveButton("Verify & import") { _, _ ->
@@ -747,49 +821,69 @@ class MainActivity : Activity() {
     }
 
     private fun credentialCard(
-        fullName: String,
-        access: String,
-        transferable: String,
-        description: String,
-        artwork: String,
+        snapshot: CredentialSnapshot,
+        mode: PassCardMode,
+        selected: Boolean,
+        onSelect: () -> Unit,
     ) = productCard().apply {
+        val fullName = snapshot.fullName
+        val artwork = snapshot.avatarUri.orEmpty()
+        val access = if (snapshot.authoritativeAllowed) "Allowed" else "Not allowed"
+        val label = fullName.substringBefore('.')
+        val passType = if (label.startsWith("staff-")) "STAFF ACCESS" else "ACCESS PASS"
+        elevation = dp(if (selected) 12 else 3).toFloat()
+        setOnClickListener { onSelect() }
         val header = LinearLayout(this@MainActivity).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         val placeholder = TextView(this@MainActivity).apply {
-            text = "SA"
+            text = if (passType == "STAFF ACCESS") "SA" else "AP"
             gravity = Gravity.CENTER
             textSize = 20f
             setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
             background = roundedBackground(accentColor(), dp(16).toFloat())
-            contentDescription = if (artwork.isBlank()) "Staff access artwork placeholder" else "Staff access artwork"
+            contentDescription = if (artwork.isBlank()) "Access pass artwork placeholder" else "Access pass artwork"
         }
         header.addView(placeholder, LinearLayout.LayoutParams(dp(66), dp(66)).apply { marginEnd = dp(14) })
         val identity = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
-        identity.addView(productCaption("STAFF ACCESS"), matchWrapParams())
+        identity.addView(productCaption(passType), matchWrapParams())
         identity.addView(productHeading(fullName).apply {
             textSize = 17f
             maxLines = 2
         }, matchWrapParams())
         header.addView(identity, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (selected) {
+            header.addView(statusChip("SELECTED", positive = true), LinearLayout.LayoutParams(dp(104), dp(34)))
+        }
         addView(header, matchWrapParams())
         addView(statusChip(access.uppercase(), positive = access == "Allowed"), LinearLayout.LayoutParams(dp(116), dp(36)).apply {
             topMargin = dp(16)
             bottomMargin = dp(10)
         })
-        addView(valueRow("Valid until", "31 Oct 2026"), matchWrapParams())
-        addView(productBody(transferable).apply {
-            setTextColor(textPrimaryColor())
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, dp(2), 0, dp(12))
-        }, matchWrapParams())
-        addView(valueRow("Description", description), matchWrapParams())
-        if (artwork.isNotBlank()) {
-            addView(productCaption("ARTWORK LINKED"), matchWrapParams())
+        addView(valueRow("Valid until", formatPassExpiry(snapshot.registryExpiry)), matchWrapParams())
+        if (mode != PassCardMode.STACKED_SUMMARY) {
+            addView(productBody(if (snapshot.transferable == false) "Non-transferable" else "Transferable").apply {
+                setTextColor(textPrimaryColor())
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, dp(2), 0, dp(12))
+            }, matchWrapParams())
+            addView(valueRow("Description", snapshot.description.orEmpty().ifBlank { "Not set" }), matchWrapParams())
+            addView(valueRow("Owner", snapshot.owner.orEmpty()), matchWrapParams())
+            addView(valueRow("Issuer registry", ProductShellPolicy.compactAddress(snapshot.registry)), matchWrapParams())
+            addView(valueRow("Provenance", if (snapshot.provenanceMatches) "Verified" else "Unavailable"), matchWrapParams())
+            if (artwork.isNotBlank()) addView(productCaption("ARTWORK LINKED"), matchWrapParams())
+        } else {
+            addView(productBody("Tap to select and expand").apply { setPadding(0, dp(4), 0, 0) }, matchWrapParams())
         }
     }
+
+    private fun formatPassExpiry(expiry: BigInteger?): String = expiry?.let {
+        runCatching {
+            PASS_DATE_FORMAT.format(Instant.ofEpochSecond(it.longValueExact()).atZone(ZoneId.systemDefault()))
+        }.getOrNull()
+    } ?: "Unavailable"
 
     private fun reviewPreviewCard(review: StaffReviewPresentation) = productCard().apply {
         val header = LinearLayout(this@MainActivity).apply {
@@ -970,9 +1064,7 @@ class MainActivity : Activity() {
                 onSuccess = { user ->
                     otpInput.text.clear()
                     currentUser = user
-                    showAuthenticatedShell()
-                    showStatus("Email authentication succeeded.")
-                    reuseExistingWallet()
+                    restoreAuthenticatedUser(user, "Email authentication succeeded.")
                 },
                 onFailure = { showSafeFailure("Email authentication", it) },
             )
@@ -984,12 +1076,19 @@ class MainActivity : Activity() {
             gateBApplication.privy.logout()
             currentUser = null
             ethereumWallet = null
+            authenticatedWallets = emptyList()
+            lastOwnedCredentials = emptyList()
+            credentialRefreshJob?.cancel()
+            credentialRefreshJob = null
             contractRunner = null
             walletText.text = "Current wallet\nNot available"
             settingsIdentityText.text = "Wallet not ready"
             copyWalletButton.isEnabled = false
             issuerCapabilityConfirmed = false
+            issuerCapabilityState = IssuerCapabilityState.UNAVAILABLE
             issuerNavButton.visibility = View.GONE
+            walletsList.removeAllViews()
+            capabilityStatusText.text = WalletCapabilityPresentation.issuerLabel(issuerCapabilityState)
             myKeysCards.removeAllViews()
             myKeysEmptyCard.visibility = View.VISIBLE
             myKeysActions.visibility = View.GONE
@@ -1001,44 +1100,64 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun createOrReuseWallet() {
-        runAction("Preparing embedded Ethereum wallet…") {
+    private fun createAnotherWallet() {
+        val hasWallet = authenticatedWallets.isNotEmpty()
+        runAction(if (hasWallet) "Creating another embedded Ethereum wallet…" else "Creating embedded Ethereum wallet…") {
             val user = currentUser ?: gateBApplication.privy.getUser()
             if (user == null) {
                 showStatus("Log in before creating a wallet.")
                 return@runAction
             }
             currentUser = user
-            val existing = user.embeddedEthereumWallets.firstOrNull()
-            if (existing != null) {
-                selectWallet(existing, "Existing embedded Ethereum wallet reused.")
-                return@runAction
-            }
-            user.createEthereumWallet(allowAdditional = false).fold(
-                onSuccess = { selectWallet(it, "Embedded Ethereum wallet created.") },
+            user.createEthereumWallet(allowAdditional = user.embeddedEthereumWallets.isNotEmpty()).fold(
+                onSuccess = { created ->
+                    authenticatedWallets = (user.embeddedEthereumWallets + created)
+                        .distinctBy { it.address.lowercase() }
+                    selectWallet(created, "Embedded Ethereum wallet created and selected.")
+                },
                 onFailure = { showSafeFailure("Wallet creation", it) },
             )
         }
     }
 
-    private fun reuseExistingWallet() {
-        showAuthenticatedShell()
-        val existing = currentUser?.embeddedEthereumWallets?.firstOrNull()
-        if (existing == null) {
+    private fun restoreAuthenticatedUser(user: PrivyUser, status: String) {
+        currentUser = user
+        authenticatedWallets = user.embeddedEthereumWallets.distinctBy { it.address.lowercase() }
+        val selectedModel = ActiveWalletPolicy.select(
+            authenticatedWallets.map(::walletModel),
+            activeWalletStore.loadAddress(),
+        )
+        val selected = selectedModel?.let { model ->
+            authenticatedWallets.single { it.address.equals(model.address, true) }
+        }
+        if (selected == null) {
+            showAuthenticatedShell()
             shellIdentityText.text = "Account setup\nWallet not ready"
+            settingsIdentityText.text = "Wallet not ready"
+            renderWallets()
             showHceSignerStatus("CREATE WALLET FIRST")
+            showStatus(status)
             return
         }
-        selectWallet(existing, "Existing embedded Ethereum wallet reused.")
+        selectWallet(selected, status)
     }
 
     private fun selectWallet(wallet: EmbeddedEthereumWallet, status: String) {
+        val model = ActiveWalletPolicy.requireSelectable(authenticatedWallets.map(::walletModel), wallet.address)
+        activeWalletStore.save(model)
         ethereumWallet = wallet
-        showAuthenticatedShell()
-        shellIdentityText.text = ProductShellPolicy.identityLabel(wallet.address, false)
-        settingsIdentityText.text = ProductShellPolicy.identityLabel(wallet.address, false)
+        credentialRefreshJob?.cancel()
+        credentialRefreshJob = null
+        issuerCapabilityConfirmed = false
+        issuerCapabilityState = IssuerCapabilityState.UNAVAILABLE
+        shellIdentityText.text = WalletCapabilityPresentation.identity(wallet.address)
+        settingsIdentityText.text = WalletCapabilityPresentation.identity(wallet.address)
         walletText.text = "Current wallet\n${wallet.address}"
+        capabilityStatusText.text = WalletCapabilityPresentation.issuerLabel(issuerCapabilityState)
         copyWalletButton.isEnabled = true
+        lastOwnedCredentials = emptyList()
+        lastCredentialRefreshAtMillis = 0L
+        renderWallets()
         showHceSignerStatus("READY")
         clearSignature()
         resetMobileIssuerAdmission(wallet)
@@ -1053,7 +1172,40 @@ class MainActivity : Activity() {
             engine = credentialTransactionEngine,
         )
         refreshProduct(wallet.address)
+        showAuthenticatedShell()
         showStatus(status)
+    }
+
+    private fun walletModel(wallet: EmbeddedEthereumWallet) = ActiveWallet(
+        address = wallet.address,
+        providerIdentity = wallet.id,
+        hdWalletIndex = wallet.hdWalletIndex,
+    )
+
+    private fun renderWallets() {
+        walletsList.removeAllViews()
+        authenticatedWallets.sortedWith(compareBy<EmbeddedEthereumWallet> { it.hdWalletIndex }.thenBy { it.address })
+            .forEach { wallet ->
+                val active = wallet.address.equals(ethereumWallet?.address, true)
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, dp(5), 0, dp(5))
+                }
+                row.addView(productBody(ProductShellPolicy.compactAddress(wallet.address)).apply {
+                    setTextColor(textPrimaryColor())
+                    setTypeface(Typeface.MONOSPACE)
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                if (active) {
+                    row.addView(statusChip("ACTIVE", positive = true), LinearLayout.LayoutParams(dp(92), dp(34)))
+                } else {
+                    row.addView(productButton("Select", primary = false) {
+                        selectWallet(wallet, "Active wallet changed. My Keys and capabilities refreshed.")
+                    }, LinearLayout.LayoutParams(dp(104), dp(44)))
+                }
+                walletsList.addView(row, matchWrapParams())
+            }
+        createWalletButton.text = if (authenticatedWallets.isEmpty()) "Create wallet" else "Create another wallet"
     }
 
     private fun resetMobileIssuerAdmission(wallet: EmbeddedEthereumWallet) {
@@ -1121,13 +1273,16 @@ class MainActivity : Activity() {
     }
 
     private fun refreshProduct(walletAddress: String) {
-        activityScope.launch {
+        if (credentialRefreshJob?.isActive == true) return
+        credentialRefreshJob = activityScope.launch {
             val capability = credentialReader.issuerCapability(walletAddress)
             if (ethereumWallet?.address?.equals(walletAddress, true) != true) return@launch
+            issuerCapabilityState = capability.state
             issuerCapabilityConfirmed = capability.allowed
             issuerNavButton.visibility = if (capability.allowed) View.VISIBLE else View.GONE
-            shellIdentityText.text = ProductShellPolicy.identityLabel(walletAddress, capability.allowed)
-            settingsIdentityText.text = ProductShellPolicy.identityLabel(walletAddress, capability.allowed)
+            shellIdentityText.text = WalletCapabilityPresentation.identity(walletAddress)
+            settingsIdentityText.text = WalletCapabilityPresentation.identity(walletAddress)
+            capabilityStatusText.text = WalletCapabilityPresentation.issuerLabel(capability.state)
             if (!capability.allowed && currentDestination == ProductDestination.ISSUER) {
                 showDestination(ProductDestination.MY_KEYS)
             }
@@ -1504,41 +1659,69 @@ class MainActivity : Activity() {
         runAction("Refreshing My Keys from Sepolia…") { refreshMyKeysInternal(wallet.address) }
     }
 
+    private fun refreshMyKeysAsync(wallet: String) {
+        if (credentialRefreshJob?.isActive == true) return
+        credentialRefreshJob = activityScope.launch {
+            refreshMyKeysInternal(wallet)
+        }
+    }
+
     private suspend fun refreshMyKeysInternal(wallet: String) {
-        val references = credentialIndex.list(wallet)
+        if (ethereumWallet?.address?.equals(wallet, true) != true) return
+        val result = credentialDiscovery.discover(wallet, credentialIndex.list(wallet))
+        if (ethereumWallet?.address?.equals(wallet, true) != true) return
+        lastCredentialRefreshAtMillis = System.currentTimeMillis()
         myKeysCards.removeAllViews()
-        if (references.isEmpty()) {
+        when (result) {
+            is CredentialDiscoveryResult.Unavailable -> {
+                lastOwnedCredentials = emptyList()
+                myKeysEmptyCard.visibility = View.VISIBLE
+                myKeysActions.visibility = View.VISIBLE
+                myKeysText.text = "Pass discovery unavailable\nPull to retry safely"
+                showStatus("My Keys is unavailable. No cached ownership was treated as authoritative.")
+            }
+            is CredentialDiscoveryResult.Available -> {
+                lastOwnedCredentials = result.credentials
+                Log.i(
+                    DISCOVERY_LOG_TAG,
+                    "R1_DISCOVERY active=${ProductShellPolicy.compactAddress(wallet)} " +
+                        "automaticCandidates=${result.candidateCount} owned=${result.credentials.size} " +
+                        "scannedTo=${result.scannedToBlock}",
+                )
+                val selected = selectedPassStore.validate(IssuerSpace.chainId, wallet, result.credentials)
+                renderCredentialStack(wallet, result.credentials, selected)
+            }
+        }
+    }
+
+    private fun renderCredentialStack(
+        wallet: String,
+        credentials: List<CredentialSnapshot>,
+        selectedName: String?,
+    ) {
+        myKeysCards.removeAllViews()
+        if (credentials.isEmpty()) {
             myKeysEmptyCard.visibility = View.VISIBLE
-            myKeysActions.visibility = View.GONE
-            myKeysText.text = "No credentials yet"
+            myKeysActions.visibility = View.VISIBLE
+            myKeysText.text = "No passes found for this wallet"
             return
         }
-        var unavailable = 0
-        references.forEach { reference ->
-            val snapshot = credentialReader.read(reference.fullName)
-            if (CredentialProductPolicy.ownedBy(snapshot, wallet)) {
-                myKeysCards.addView(credentialCard(
-                    fullName = snapshot.fullName,
-                    access = if (snapshot.authoritativeAllowed) "Allowed" else "Not allowed",
-                    transferable = if (snapshot.transferable == false) "Non-transferable" else "Transferable",
-                    description = snapshot.description.orEmpty().ifBlank { "Not set" },
-                    artwork = snapshot.avatarUri.orEmpty(),
-                ), cardParams())
-            } else {
-                unavailable += 1
-            }
-        }
-        if (myKeysCards.childCount > 0) {
-            myKeysEmptyCard.visibility = View.GONE
-            myKeysActions.visibility = View.VISIBLE
-        } else {
-            myKeysEmptyCard.visibility = View.VISIBLE
-            myKeysActions.visibility = View.GONE
-            myKeysText.text = if (unavailable > 0) {
-                "No verified credentials found"
-            } else {
-                "No credentials yet"
-            }
+        myKeysEmptyCard.visibility = View.GONE
+        myKeysActions.visibility = View.VISIBLE
+        val ordered = credentials.sortedWith(
+            compareBy<CredentialSnapshot> { it.fullName == selectedName }.thenBy { it.fullName },
+        )
+        ordered.forEachIndexed { index, snapshot ->
+            val selected = snapshot.fullName == selectedName
+            val mode = PassStackPolicy.mode(ordered.size, selected)
+            myKeysCards.addView(
+                credentialCard(snapshot, mode, selected) {
+                    selectedPassStore.select(IssuerSpace.chainId, wallet, snapshot)
+                    renderCredentialStack(wallet, lastOwnedCredentials, snapshot.fullName)
+                    showStatus("Pass selected for future presentation. NFC behavior is unchanged.")
+                },
+                cardParams().apply { topMargin = dp(PassStackPolicy.overlapDp(ordered.size, index)) },
+            )
         }
     }
 
@@ -2090,6 +2273,12 @@ class MainActivity : Activity() {
         const val CREDENTIAL_TRANSACTION_JOURNAL = "transaction_journal_v1"
         const val CREDENTIAL_ISSUANCE_JOURNAL = "staff_issuance_v1"
         const val CREDENTIAL_LOCAL_INDEX = "local_index_v1"
+        const val ACTIVE_WALLET = "active_wallet_v1"
+        const val SELECTED_PASS = "selected_pass_v1"
+        const val MY_KEYS_REFRESH_AGE_MILLIS = 60_000L
+        const val FOREGROUND_REFRESH_AGE_MILLIS = 120_000L
+        const val DISCOVERY_LOG_TAG = "R1Discovery"
+        val PASS_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM uuuu, HH:mm")
         val SIGNATURE_PATTERN = Regex("^0x[0-9a-fA-F]{130}$")
     }
 }
