@@ -2,6 +2,12 @@
 
 A Sepolia prototype connecting a persistent ENSv2 credential to a physical NFC interaction. The credential remains owned and REGISTERED while its independent access state changes, so revoking entry does not burn or unregister the credential.
 
+## Final LockENS demo
+
+The final demo now uses real multi-wallet passes, selected-pass Android HCE, three physical Android gate readers, resource-bound holder proofs, authoritative ENSv2 policy checks, remote pass artwork, and fail-closed transport handling. Staff, Visitor, Contractor and four single-wallet showcase scenarios have been issued and physically validated.
+
+See [FINAL_DEMO_STATE.md](FINAL_DEMO_STATE.md) for public wallet addresses, credential policies, Sepolia transaction hashes, artwork attribution, the physical validation matrix, and the active feature-freeze rules. Earlier checkpoints below remain as historical engineering evidence.
+
 ## LockENS dynamic NFC and virtual gates
 
 The current implementation connects the selected Android pass and active Privy wallet to credential-first NFC discovery, resource-bound holder proof, authoritative ENS owner/policy verification, and a local Gate Monitor. Front Door, Lab, and Server Room share one reference ESP32/PN532 verifier. A virtual grant requires serial controller confirmation; there is no physical door actuator.

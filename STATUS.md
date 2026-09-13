@@ -1,5 +1,15 @@
 # Status
 
+## Final LockENS demo - 2026-09-13
+
+**DEMO READY. FEATURE FREEZE ACTIVE.**
+
+Seven fresh demo credentials across four holder wallets are registered and configured on Sepolia. The required Staff/Visitor/Contractor physical matrix passed, the operator successfully exercised all four additional artwork-backed showcase credentials, all three gate readers reached READY, and remote artwork rendered for every showcase card. Wallet switching, pass discovery, stacked-card presentation and HCE invalidation are physically validated.
+
+Create and Manage walkthroughs are prepared without extra transactions. Validation passes: Node 238/238, Android unit tests, `assembleDebug`, and dynamic plus legacy firmware compilation. See [FINAL_DEMO_STATE.md](FINAL_DEMO_STATE.md) for the complete public state, transaction hashes, policy/physical matrices, attribution, and freeze boundaries.
+
+The sections below are historical checkpoints and may describe capabilities that were incomplete at the time.
+
 ## Physical NFC checkpoint - 2026-09-12
 
 Dynamic NFC works physically end-to-end with `staff-001.keys.demo-access.eth` and virtual gate **Lab**. The authorized tap at 13:43:43-13:43:47 UTC completed discovery, the 109-byte challenge APDU, the 67-byte signature APDU response, the 65-byte holder proof, fresh authoritative verification and serial controller confirmation. Final decision: **ACCESS DENIED / RESOURCE_POLICY_MISSING**. Existing STAFF has no `resources.v1`; no resource policy was written. This is an authorization decision, not a transport failure.
