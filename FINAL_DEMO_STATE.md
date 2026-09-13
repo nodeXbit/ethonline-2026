@@ -48,6 +48,8 @@ All 14 journaled operations are confirmed. The unused walkthrough label `video-p
 
 The four showcase cards were refreshed from Sepolia and visually verified together in My Keys. Each rendered its remote HTTPS image rather than relying on the deterministic fallback.
 
+Complete creator, license, modification, and packaged Gate Stand asset provenance is recorded in [ATTRIBUTIONS.md](ATTRIBUTIONS.md).
+
 | Pass | Source and license |
 | --- | --- |
 | Showcase all | [Standard lock key](https://commons.wikimedia.org/wiki/File:Standard-lock-key.jpg), public domain |
@@ -61,10 +63,10 @@ The operator confirmed that all final credentials behaved correctly on the physi
 
 | Test | Result | Door behavior |
 | --- | --- | --- |
-| Staff -> Lab | `ACCESS GRANTED` | Opened only after authoritative allow |
-| Staff -> Server Room | `ACCESS GRANTED` | Opened only after authoritative allow |
+| Staff -> Lab | `ACCESS GRANTED` | Virtual gate animation opened only after authoritative allow |
+| Staff -> Server Room | `ACCESS GRANTED` | Virtual gate animation opened only after authoritative allow |
 | Visitor -> Lab | `RESOURCE_NOT_ALLOWED` | Remained closed |
-| Visitor -> Front Door | `ACCESS GRANTED` | Opened only after authoritative allow |
+| Visitor -> Front Door | `ACCESS GRANTED` | Virtual gate animation opened only after authoritative allow |
 | Contractor -> Lab | `ACCESS_SUSPENDED` | Remained closed |
 
 The four showcase passes were also exercised successfully. Wallet switching, pass discovery, stacked-card presentation and HCE selection/invalidation were healthy. No stale pass was reported. A missing local bridge/tunnel was detected and restored before the final all-credential run; no manual recovery was needed during the confirmed run. Interaction time was not formally timed.

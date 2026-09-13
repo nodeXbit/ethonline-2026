@@ -1,5 +1,27 @@
 # Worklog
 
+## 2026-09-13 — Release privacy and documentation remediation
+
+- Completed an exhaustive privacy/publication audit across tracked content,
+  reachable history, Codex refs, and unreachable objects. No exposed credential
+  was found; ignored operational environment files remained contained and did
+  not require rotation.
+- Performed a controlled main-only history sanitation for the approved personal
+  path, device-identifier, and hardware-identifier categories. The rewrite kept
+  all files and commit topology, changed only six authorized documentation
+  paths across seven commits, passed fresh-clone validation, and preserved a
+  private recovery bundle and commit map.
+- Diagnosed the post-sanitation demo outage as missing ignored local runtime
+  prerequisites after disposable-clone work, not a code regression. Restoring
+  the existing local Node bridge, three device tunnels, gate profiles, and holder
+  state returned the documented matrix without source or blockchain changes.
+- Final sanitation validation passed 238/238 Node tests, 261 Android unit tests,
+  Android debug assembly, three approved firmware compiles, remote lease/push,
+  fresh clone verification, and operational repository resynchronization.
+- Prepared the release documentation, license, asset provenance, and honest AI
+  usage/spec/prompt disclosure without changing application code, firmware,
+  credentials, blockchain state, or product behavior.
+
 ## Physical NFC checkpoint - 2026-09-12
 
 Dynamic NFC works physically end-to-end with `staff-001.keys.demo-access.eth` and virtual gate **Lab**. The authorized tap at 13:43:43-13:43:47 UTC completed discovery, the 109-byte challenge APDU, the 67-byte signature APDU response, the 65-byte holder proof, fresh authoritative verification and serial controller confirmation. Final decision: **ACCESS DENIED / RESOURCE_POLICY_MISSING**. Existing STAFF has no `resources.v1`; no resource policy was written. This is an authorization decision, not a transport failure.

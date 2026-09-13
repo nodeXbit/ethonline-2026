@@ -1,5 +1,20 @@
 # Decisions
 
+## D-027 — Final demo uses Android NFC gate stands
+
+Accepted 2026-09-13. The release demo is one Android holder presenting a
+selected pass over HCE/NFC to three Android gate stands. One local Node service
+verifies the holder proof offchain and evaluates current ENSv2 registration,
+ownership, access, and resource policy on Sepolia. A gate displays a virtual
+opening only after authoritative Node `ALLOW`; there is no physical actuator.
+
+Privy supplies embedded-wallet authentication and signing but is not the
+resource authorization engine. ENSv2 remains load-bearing. The ESP32-S3 + PN532
+route remains an experimental alternative and historical validation path. This
+decision supersedes D-010 and earlier checkpoint language only where they name
+ESP32/PN532 as the primary final-demo controller; their historical evidence and
+hardware limitations remain valid.
+
 ## 2026-09-12 - Preserve the physically validated dynamic reference
 
 Checkpoint selected-pass Dynamic NFC and virtual resources before Pixel Reader or animation work. Physical STAFF/Lab denial with RESOURCE_POLICY_MISSING is a completed authorization flow, not a transport failure. Keep resource permissions fail-closed; do not add resources.v1 during checkpointing. Preserve SDA recovery and IRQ diagnostics without claiming SCL stability. Retain the reference firmware hash, sanitized evidence and diagnostic patches; ignore generated artifacts. Keep ten-minute monitor preparation separate from unchanged credential/proof freshness checks. Pixel Reader fallback remains unimplemented.

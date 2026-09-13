@@ -39,9 +39,9 @@ but requires a separately secured LAN transport and is outside this visual-only
 Gate Stand change. Legacy ADB TCP mode is for the private demo LAN only and may
 need to be enabled again after a phone reboot.
 
-## Original background assets
+## Gate Stand background assets
 
-The build contains three original local portrait PNG assets in
+The build contains three project-specific AI-generated portrait PNG assets in
 `app/src/main/res/drawable-nodpi/`:
 
 - `gate_scene_front_door.png`
@@ -54,6 +54,9 @@ rendered inside the gate opening, so resource-specific furniture appears as the
 authoritative ALLOW animation opens the door.
 
 No remote image URL or runtime image dependency is used.
+The exact prompts, human/AI contribution, and preserved C2PA provenance are
+documented in [ATTRIBUTIONS.md](ATTRIBUTIONS.md) and
+[docs/ai/PROMPTS.md](docs/ai/PROMPTS.md).
 
 ## Door semantics
 

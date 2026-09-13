@@ -1,106 +1,155 @@
-# ETHOnline 2026 — Persistent Physical Credential
+# LockENS
 
-A Sepolia prototype connecting a persistent ENSv2 credential to a physical NFC interaction. The credential remains owned and REGISTERED while its independent access state changes, so revoking entry does not burn or unregister the credential.
+LockENS is a Sepolia prototype for wallet-held access passes whose current
+authorization is resolved through ENSv2. A pass can remain registered to its
+holder while global access, resource permissions, validity, and transferability
+change independently.
 
-## Final LockENS demo
+The final demo shows one Android holder and three Android NFC gate stands. The
+holder selects a pass, presents it over Android HCE/NFC, and signs a fresh
+resource-bound proof with an embedded Privy wallet. A local Node service verifies
+holder control offchain, reads current ENSv2 state on Sepolia, evaluates the
+resource policy, and returns `ALLOW` or `DENY`. The virtual gate animation opens
+only after authoritative Node `ALLOW`.
 
-The final demo now uses real multi-wallet passes, selected-pass Android HCE, three physical Android gate readers, resource-bound holder proofs, authoritative ENSv2 policy checks, remote pass artwork, and fail-closed transport handling. Staff, Visitor, Contractor and four single-wallet showcase scenarios have been issued and physically validated.
+ENSv2 is load-bearing: the UserRegistry establishes current credential
+registration and ownership, while the PermissionedResolver carries the access
+and resource policy used in every decision. Privy provides embedded-wallet
+onboarding and signing; it is not the resource-authorization engine.
 
-See [FINAL_DEMO_STATE.md](FINAL_DEMO_STATE.md) for public wallet addresses, credential policies, Sepolia transaction hashes, artwork attribution, the physical validation matrix, and the active feature-freeze rules. Earlier checkpoints below remain as historical engineering evidence.
-
-## LockENS dynamic NFC and virtual gates
-
-The current implementation connects the selected Android pass and active Privy wallet to credential-first NFC discovery, resource-bound holder proof, authoritative ENS owner/policy verification, and a local Gate Monitor. Front Door, Lab, and Server Room share one reference ESP32/PN532 verifier. A virtual grant requires serial controller confirmation; there is no physical door actuator.
-
-The current physical flow is validated end-to-end: STAFF -> Lab -> holder verified -> registration valid -> global access Allowed -> proof fresh -> controller confirmed -> **ACCESS DENIED / RESOURCE_POLICY_MISSING**. Existing STAFF has no `resources.v1`; it was not changed. PN532/I2C boot stability remains incompletely characterized. Pixel Reader fallback is not implemented.
-
-The reference firmware SHA-256 is `4914015019c3659de25fd13d55ccb314b09ac4b0dfd7667f5407874e9b08ed9e`. See [STATUS](STATUS.md), [checkpoint audit and validation](PHYSICAL_NFC_CHECKPOINT.md), [diagnostic source patches](firmware/diagnostics/README.md), and [the dynamic NFC runbook](DYNAMIC_NFC_RUNBOOK.md).
-
-Run `npm run gate:monitor` for the preview-only monitor at `http://127.0.0.1:8790`, or `npm run gate:simulate` for the offline synthetic access matrix. The previous Studio baseline is `20c2dd9866f8c48bc0611dee34b9b272906a3429`; this checkpoint adds the physically validated dynamic state.
-
-The sections below document the earlier static-tag lifecycle demo and its separate write-capable commands.
-
-## Architecture
+## Current demo architecture
 
 ```text
-Physical NFC tag (UID 91:2D:E3:06)
-              │
-              ▼
-      ESP32-S3 + PN532
-              │ serial UID
-              ▼
-        Node.js bridge
-              │ read-only Sepolia lookup
-              ▼
-demo-access.eth → UserRegistry → cred-001.demo-access.eth
-                       │                    │
-                       │ ownership          └─ PermissionedResolver access.v1
-                       ▼                                  │
-                   REGISTERED                      ALLOW / DENY
+Android holder
+  -> NFC / Android HCE
+  -> Android NFC gate
+  -> local Node authoritative verifier
+  -> Sepolia RPC
+  -> ENSv2 UserRegistry + PermissionedResolver / resource policy
+  -> ALLOW / DENY
+  -> virtual gate UI
 ```
 
-UserRegistry provides persistent credential ownership. PermissionedResolver `access.v1` independently controls physical authorization.
+Node issues and verifies a one-use EIP-712 holder challenge offchain, then reads
+a coherent current ENSv2 snapshot. An active credential is not sufficient by
+itself: registration, ownership, validity, resolver provenance, global access,
+and the selected gate's resource permission must all pass. A missing bridge,
+RPC failure, stale state, invalid proof, or policy denial fails closed.
 
-The validated interactive path is:
+## What the demo demonstrates
 
-```text
-Browser digital key -> local Node server -> ENSv2 PermissionedResolver access.v1
-                                              |
-                              persistent UserRegistry credential
-```
+- Physical NFC between the holder and Android gate readers.
+- Wallet-specific pass discovery, multi-wallet selection, selected-pass HCE,
+  and invalidation when wallet/pass state changes.
+- Current ENSv2 ownership and policy reads on Sepolia.
+- Resource-specific outcomes across Front Door, Lab, and Server Room.
+- An authoritative Node decision before any virtual opening animation.
+- Issuance and management review flows backed by previously confirmed public
+  Sepolia transactions; no new transaction is required to inspect the source.
 
-The separate physical NFC bridge reads the same authoritative ENSv2 state and produces the corresponding `ALLOW` or `DENY` decision.
+The final physical matrix includes Staff grants at Lab and Server Room, a
+Visitor denial at Lab and grant at Front Door, and a suspended Contractor denial
+at Lab. Full public state and transaction evidence are in
+[FINAL_DEMO_STATE.md](FINAL_DEMO_STATE.md).
 
-## Interactive demo
+## Reproduce the software checks
 
-Start the local browser UI:
+### Requirements
+
+- Node.js 24 or newer.
+- Java 17 or newer for Gradle. Android sources target Java 17.
+- Android SDK with compile SDK 37 for Android builds.
+- Existing npm and Gradle dependencies/caches, or network access to obtain them
+  in a normal development environment.
+- Optional firmware validation: Arduino CLI with the ESP32 core and compatible
+  PN532/Wire libraries.
+
+Install Node dependencies from the lockfile in a normal development checkout:
 
 ```powershell
-npm run demo
+npm ci
 ```
 
-Open `http://127.0.0.1:4173`. The single credential card remains visible while one-click activation and deactivation move it between `INACTIVE / DENY` and `ACTIVE / ALLOW`. Pending/recovery feedback prevents repeated actions, and each completed transition refreshes from real ENSv2 reads rather than browser-local state.
-
-Run `npm run nfc:bridge` separately in a terminal and present the physical tag to prove the same lifecycle physically. The NFC bridge remains separate from the browser.
-
-For demo reliability, a dedicated Sepolia endpoint may be supplied locally through `SEPOLIA_RPC_URL`. Never commit or publish the endpoint or its API key; the public fallback remains supported.
-
-## Verified physical flow
-
-The same physical tag was presented throughout:
-
-```text
-INACTIVE → DENY
-ACTIVE   → ALLOW
-INACTIVE → DENY
-```
-
-The credential remained REGISTERED with the same owner, tokenId, resolver, and registry expiry. Rerunning persistent setup while ACTIVE was also verified to preserve the active state without another transaction.
-
-Sepolia deployment:
-
-- Parent: `demo-access.eth`
-- Credential: `cred-001.demo-access.eth`
-- UserRegistry: `0x2d249472B83A453086254Acd8a42913D8e45a2Fd`
-- PermissionedResolver: `0x0B723c0C2170F2ea508F2f4e3e122C6c0782744C`
-- Access record: `data(namehash("cred-001.demo-access.eth"), "access.v1")`
-- Access schema: `(bool active, uint64 validUntil)`
-
-## Commands
+Run the complete Node suite:
 
 ```powershell
-npm run demo
-npm run ensv2:persistent:inspect
-npm run ensv2:persistent:setup
-npm run ensv2:access:activate
-npm run ensv2:access:deactivate
-npm run nfc:bridge
+node --test --test-isolation=none
 ```
 
-The browser activate/deactivate actions and corresponding CLI commands submit Sepolia transactions. Inspect and the NFC bridge read public state.
+Run Android unit tests and build the debug APK:
 
-## Status and security
+```powershell
+cd mobile/android
+./gradlew testDebugUnitTest assembleDebug
+```
 
-This is a working Sepolia prototype, not production access-control security. The static NFC UID is clonable and serves only as a demo identifier; it is not cryptographic proof of possession, anti-cloning protection, or Aliro support.
+On Windows use `gradlew.bat`. If the Android SDK is not globally configured, set
+`ANDROID_HOME`/`ANDROID_SDK_ROOT` or use an ignored `local.properties` file.
 
-The interactive browser and physical NFC lifecycle are validated on Sepolia. This remains a prototype, not production physical security. Aliro, account abstraction, collectible presentation, NFT/dynamic metadata, loyalty, transferability, and programmable benefits are not implemented.
+The frozen release validation passed 238/238 Node tests, 261 Android unit tests,
+Android `assembleDebug`, and compilation of the three approved ESP32-S3
+firmware sketches.
+
+## Local configuration and operation
+
+Copy `.env.example` or `.env.nfc.example` to the corresponding ignored local
+file and replace only the documented placeholders. Android Privy configuration
+uses `mobile/android/privy.local.properties.example`; the local copy is ignored.
+Private keys, credential-bearing RPC endpoints, application credentials, and
+device mappings must never be committed.
+
+Compilation and source inspection do not require the developer's issuer private
+key. Public judges can build the Android app, run tests, inspect public Sepolia
+configuration, and review the architecture without authority to issue or modify
+credentials. Operating the exact live demo additionally requires local Privy
+client configuration, a Sepolia RPC endpoint, the local Node verifier, the
+existing demo devices, and the already-issued passes. Issuer-authorized writes
+are a separate, explicitly controlled operation.
+
+The final local verifier entry point is:
+
+```powershell
+npm run pixel-gate:bridge
+```
+
+Generic setup and architecture references are documented in
+[ANDROID_GATE_READER.md](ANDROID_GATE_READER.md), [GATE_STAND.md](GATE_STAND.md),
+and [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md). Device-specific recording-day data stays
+under ignored `.runtime/` files.
+
+## Evidence and limitations
+
+Verified release evidence includes the final resource-policy matrix, physical
+NFC grant/deny cases, multi-wallet selection, HCE freshness/invalidation, the
+test/build results above, and current ENSv2/Sepolia configuration. The
+ESP32-S3 + PN532 implementation remains an alternative experimental hardware
+route with its own boot, wiring, and interoperability limitations; it is not the
+primary final demo gate.
+
+LockENS remains a Sepolia prototype:
+
+- The UI controls a virtual gate animation, not a physical lock or actuator.
+- The final architecture depends on a local PC running the Node verifier.
+- Validation covers the documented Android device matrix, not universal Android
+  compatibility.
+- The system is not production-ready, fully decentralized, offline/autonomous,
+  or a secure hardware-enrollment system.
+- Revocation is reflected when the verifier obtains current authoritative state;
+  no instant atomic physical-revocation claim is made.
+- The alternate PN532 route is not claimed as universally stable or
+  production-ready.
+
+Earlier checkpoint reports are retained as historical engineering evidence and
+may describe missing policy, pending Android fallback work, or the experimental
+PN532 path before the final Android-gate demo was completed. They are not the
+current product state. Start with this README, [STATUS.md](STATUS.md), and
+[FINAL_DEMO_STATE.md](FINAL_DEMO_STATE.md).
+
+## License, assets, and AI disclosure
+
+Original LockENS software is available under the [MIT License](LICENSE).
+Third-party artwork remains under its source license and is not relicensed by
+MIT; see [ATTRIBUTIONS.md](ATTRIBUTIONS.md). AI-assisted development, human
+control, asset generation, specifications, and sanitized prompt evidence are
+documented in [AI_USAGE.md](AI_USAGE.md), [docs/ai/SPECS.md](docs/ai/SPECS.md),
+and [docs/ai/PROMPTS.md](docs/ai/PROMPTS.md).
