@@ -44,9 +44,11 @@ No remote image URL or runtime image dependency is used.
 ## Door semantics
 
 The door starts closed and stays closed while reading, signing, on transport
-errors, and for every DENY. The lightweight Canvas animation is invoked only
-after a completed Node response with `allowed: true`. The revealed interior is
-decorative and never feeds back into authorization.
+errors, and for every DENY. An authoritative DENY animates a large prohibition
+symbol over the closed door; it does not color or move the frame. The door-open
+Canvas animation is invoked only after a completed Node response with
+`allowed: true`. The revealed interior is decorative and never feeds back into
+authorization.
 
 The security panel contains only:
 

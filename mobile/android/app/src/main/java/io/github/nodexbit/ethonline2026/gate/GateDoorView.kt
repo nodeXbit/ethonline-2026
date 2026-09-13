@@ -9,7 +9,9 @@ import android.graphics.Path
 import android.graphics.RectF
 import android.view.View
 import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import kotlin.math.max
+import kotlin.math.min
 
 /** Lightweight gate visual. Authorization never enters this class. */
 class GateDoorView(context: Context, private val profile: String) : View(context) {
@@ -17,6 +19,7 @@ class GateDoorView(context: Context, private val profile: String) : View(context
     private val frame = RectF()
     private var progress = 0f
     private var denied = false
+    private var deniedSymbolProgress = 0f
     private var verifyingPulse = 0f
     private var animator: ValueAnimator? = null
 
@@ -28,6 +31,7 @@ class GateDoorView(context: Context, private val profile: String) : View(context
         animator?.cancel()
         progress = 0f
         denied = false
+        deniedSymbolProgress = 0f
         verifyingPulse = 0f
         contentDescription = "Virtual gate closed — ready"
         invalidate()
@@ -37,6 +41,7 @@ class GateDoorView(context: Context, private val profile: String) : View(context
         animator?.cancel()
         progress = 0f
         denied = false
+        deniedSymbolProgress = 0f
         contentDescription = "Virtual gate closed — verifying"
         ValueAnimator.ofFloat(0f, 1f).also { animation ->
             animator = animation
@@ -57,10 +62,21 @@ class GateDoorView(context: Context, private val profile: String) : View(context
         denied = !allowed
         if (!allowed) {
             progress = 0f
-            contentDescription = "Virtual gate closed — denied"
-            invalidate()
+            deniedSymbolProgress = 0f
+            contentDescription = "Virtual gate closed — access denied"
+            ValueAnimator.ofFloat(0f, 1f).also { animation ->
+                animator = animation
+                animation.duration = 480
+                animation.interpolator = OvershootInterpolator(0.72f)
+                animation.addUpdateListener {
+                    deniedSymbolProgress = it.animatedValue as Float
+                    invalidate()
+                }
+                animation.start()
+            }
             return
         }
+        deniedSymbolProgress = 0f
         contentDescription = "Virtual gate opening — authoritative allow"
         ValueAnimator.ofFloat(progress, 1f).also { animation ->
             animator = animation
@@ -95,7 +111,6 @@ class GateDoorView(context: Context, private val profile: String) : View(context
         paint.style = Paint.Style.STROKE
         paint.strokeWidth = 8f + verifyingPulse * 3f
         paint.color = when {
-            denied -> Color.rgb(239, 83, 80)
             verifyingPulse > 0f -> Color.rgb(92, (190 + verifyingPulse * 55).toInt(), 235)
             else -> frameAccent()
         }
@@ -116,9 +131,30 @@ class GateDoorView(context: Context, private val profile: String) : View(context
         canvas.drawPath(door, paint)
         if (visibleWidth > 70f) {
             paint.style = Paint.Style.FILL
-            paint.color = if (denied) Color.rgb(239, 83, 80) else Color.rgb(224, 194, 112)
+            paint.color = Color.rgb(224, 194, 112)
             canvas.drawCircle(opening.left + visibleWidth - 34f, opening.centerY(), 8f, paint)
         }
+        if (denied) drawDeniedSymbol(canvas, opening)
+    }
+
+    private fun drawDeniedSymbol(canvas: Canvas, opening: RectF) {
+        val animated = deniedSymbolProgress.coerceIn(0f, 1f)
+        if (animated <= 0f) return
+        val scale = 0.58f + 0.42f * animated
+        val radius = min(opening.width(), opening.height()) * 0.23f * scale
+        val centerX = opening.centerX()
+        val centerY = opening.top + opening.height() * 0.46f
+        paint.style = Paint.Style.FILL
+        paint.color = Color.argb((150 * animated).toInt(), 7, 12, 18)
+        canvas.drawCircle(centerX, centerY, radius * 1.34f, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.strokeWidth = max(11f, radius * 0.15f)
+        paint.color = Color.argb((255 * animated).toInt(), 255, 76, 82)
+        canvas.drawCircle(centerX, centerY, radius, paint)
+        val diagonal = radius * 0.69f
+        canvas.drawLine(centerX - diagonal, centerY - diagonal, centerX + diagonal, centerY + diagonal, paint)
+        paint.strokeCap = Paint.Cap.BUTT
     }
 
     private fun drawApproach(canvas: Canvas) {
