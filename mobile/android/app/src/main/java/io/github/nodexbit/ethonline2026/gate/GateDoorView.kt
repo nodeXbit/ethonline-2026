@@ -4,8 +4,10 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.BitmapFactory
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.view.View
 import android.view.animation.DecelerateInterpolator
@@ -14,9 +16,16 @@ import kotlin.math.max
 import kotlin.math.min
 
 /** Lightweight gate visual. Authorization never enters this class. */
-class GateDoorView(context: Context, private val profile: String) : View(context) {
+class GateDoorView(
+    context: Context,
+    private val profile: String,
+    private val sceneResource: Int,
+) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val frame = RectF()
+    private val sceneBitmap by lazy(LazyThreadSafetyMode.NONE) {
+        BitmapFactory.decodeResource(resources, sceneResource)
+    }
     private var progress = 0f
     private var denied = false
     private var deniedSymbolProgress = 0f
@@ -262,50 +271,20 @@ class GateDoorView(context: Context, private val profile: String) : View(context
     }
 
     private fun drawInterior(canvas: Canvas, opening: RectF) {
+        val bitmap = sceneBitmap
+        val sourceRatio = bitmap.width.toFloat() / bitmap.height
+        val targetRatio = opening.width() / opening.height()
+        val source = if (sourceRatio > targetRatio) {
+            val sourceWidth = (bitmap.height * targetRatio).toInt()
+            val left = (bitmap.width - sourceWidth) / 2
+            Rect(left, 0, left + sourceWidth, bitmap.height)
+        } else {
+            val sourceHeight = (bitmap.width / targetRatio).toInt()
+            val top = (bitmap.height - sourceHeight) / 2
+            Rect(0, top, bitmap.width, top + sourceHeight)
+        }
         paint.style = Paint.Style.FILL
-        paint.color = when (profile) {
-            "front-door" -> Color.rgb(239, 194, 124)
-            "server-room" -> Color.rgb(43, 101, 145)
-            else -> Color.rgb(102, 202, 190)
-        }
-        canvas.drawRect(opening, paint)
-        when (profile) {
-            "front-door" -> {
-                paint.color = Color.argb(120, 255, 250, 225)
-                canvas.drawCircle(opening.centerX(), opening.top + opening.height() * 0.23f, opening.width() * 0.25f, paint)
-                paint.color = Color.rgb(139, 105, 72)
-                canvas.drawRect(opening.left, opening.bottom - opening.height() * 0.34f, opening.right, opening.bottom, paint)
-                paint.color = Color.argb(115, 255, 235, 190)
-                repeat(4) { index ->
-                    val inset = index * opening.width() * 0.10f
-                    canvas.drawLine(opening.left + inset, opening.bottom, opening.centerX(), opening.top + opening.height() * 0.57f, paint)
-                    canvas.drawLine(opening.right - inset, opening.bottom, opening.centerX(), opening.top + opening.height() * 0.57f, paint)
-                }
-            }
-            "server-room" -> {
-                paint.color = Color.rgb(18, 29, 43)
-                val rackWidth = opening.width() * 0.25f
-                canvas.drawRect(opening.left + 18f, opening.top + 28f, opening.left + 18f + rackWidth, opening.bottom, paint)
-                canvas.drawRect(opening.right - 18f - rackWidth, opening.top + 28f, opening.right - 18f, opening.bottom, paint)
-                paint.color = Color.rgb(60, 224, 185)
-                repeat(7) { row ->
-                    val y = opening.top + 55f + row * opening.height() / 9f
-                    canvas.drawCircle(opening.left + 34f, y, 4f, paint)
-                    canvas.drawCircle(opening.right - 34f, y, 4f, paint)
-                }
-            }
-            else -> {
-                paint.color = Color.argb(115, 235, 255, 252)
-                repeat(4) { index ->
-                    val y = opening.top + (index + 1) * opening.height() / 5f
-                    canvas.drawRect(opening.left + 22f, y, opening.right - 22f, y + 3f, paint)
-                }
-                paint.color = Color.rgb(35, 91, 94)
-                canvas.drawRect(opening.left + 30f, opening.bottom - opening.height() * 0.26f, opening.right - 30f, opening.bottom, paint)
-                paint.color = Color.rgb(221, 242, 239)
-                canvas.drawRect(opening.left + 44f, opening.bottom - opening.height() * 0.34f, opening.centerX() - 10f, opening.bottom - opening.height() * 0.27f, paint)
-                canvas.drawRect(opening.centerX() + 10f, opening.bottom - opening.height() * 0.34f, opening.right - 44f, opening.bottom - opening.height() * 0.27f, paint)
-            }
-        }
+        paint.alpha = 255
+        canvas.drawBitmap(bitmap, source, opening, paint)
     }
 }

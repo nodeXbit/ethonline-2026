@@ -3288,7 +3288,15 @@ class MainActivity : Activity() {
         nfcReadyText.removeCallbacks(nfcReadinessTick)
         if (!isDestroyed) nfcReadyText.postDelayed(nfcReadinessTick, 1_000)
     }
-    private val nfcReadinessTick = Runnable { updateNfcReadyText() }
+    private val nfcReadinessTick = Runnable {
+        updateNfcReadyText()
+        val wallet = ethereumWallet
+        if (wallet != null && lastOwnedCredentials.isNotEmpty() &&
+            System.currentTimeMillis() - lastCredentialRefreshAtMillis >= NFC_PUBLICATION_REFRESH_AGE_MILLIS
+        ) {
+            refreshMyKeysAsync(wallet.address)
+        }
+    }
 
     private fun safeErrorClass(error: Throwable): String =
         error::class.simpleName?.take(80) ?: "Error"
@@ -3337,6 +3345,7 @@ class MainActivity : Activity() {
         const val SELECTED_PASS = "selected_pass_v1"
         const val MY_KEYS_REFRESH_AGE_MILLIS = 60_000L
         const val FOREGROUND_REFRESH_AGE_MILLIS = 120_000L
+        const val NFC_PUBLICATION_REFRESH_AGE_MILLIS = 45_000L
         const val DISCOVERY_LOG_TAG = "R1Discovery"
         val PASS_DATE_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("d MMM uuuu, HH:mm")
         val SIGNATURE_PATTERN = Regex("^0x[0-9a-fA-F]{130}$")

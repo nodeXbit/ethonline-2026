@@ -10,6 +10,8 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.SpannableString
 import android.text.Spanned
 import android.text.style.RelativeSizeSpan
@@ -28,18 +30,19 @@ import java.util.concurrent.Executors
 
 class GateReaderActivity : Activity(), GateReaderEvents {
     private val worker = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var controller: GateReaderController
     private lateinit var profile: AccessResource
     private lateinit var door: GateDoorView
     private lateinit var statusText: TextView
     private lateinit var credentialText: TextView
     private lateinit var holderText: TextView
-    private lateinit var registrationText: TextView
     private lateinit var globalText: TextView
     private lateinit var resourceText: TextView
     private lateinit var proofText: TextView
     private lateinit var finalText: TextView
     private var mode: AndroidReaderMode? = null
+    private var visualReset: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,12 +76,14 @@ class GateReaderActivity : Activity(), GateReaderEvents {
     }
 
     override fun onPause() {
+        cancelVisualReset()
         controller.onPause()
         mode = null
         super.onPause()
     }
 
     override fun onDestroy() {
+        cancelVisualReset()
         worker.shutdownNow()
         super.onDestroy()
     }
@@ -92,10 +97,10 @@ class GateReaderActivity : Activity(), GateReaderEvents {
             else -> value
         }
         if (value.startsWith("HOLDER")) {
+            cancelVisualReset()
             door.showVerifying()
             credentialText.text = "READING…"
             holderText.text = "VERIFYING…"
-            registrationText.text = "PENDING"
             globalText.text = "PENDING"
             resourceText.text = "PENDING"
             proofText.text = "PENDING"
@@ -112,7 +117,6 @@ class GateReaderActivity : Activity(), GateReaderEvents {
     override fun decision(value: PixelGateDecision) = ui {
         Log.i(LOG_TAG, "decision=${value.reason} allowed=${value.allowed}")
         holderText.text = value.holder.uppercase()
-        registrationText.text = value.registration.uppercase()
         globalText.text = value.globalAccess.uppercase()
         resourceText.text = value.resourcePolicy.uppercase()
         proofText.text = value.proof.uppercase()
@@ -120,6 +124,7 @@ class GateReaderActivity : Activity(), GateReaderEvents {
         finalText.setTextColor(if (value.allowed) GRANTED else DENIED)
         statusText.text = if (value.allowed) "VIRTUAL GATE OPEN" else "VERIFIER TRANSPORT CONFIRMED"
         door.showAuthoritativeDecision(value.allowed)
+        scheduleVisualReset(if (value.allowed) "VIRTUAL GATE OPEN" else "ACCESS DENIED")
     }
 
     override fun failure(reason: String) = ui {
@@ -129,6 +134,7 @@ class GateReaderActivity : Activity(), GateReaderEvents {
         finalText.text = "TECHNICAL ERROR\n$reason"
         finalText.setTextColor(DENIED)
         door.showAuthoritativeDecision(false)
+        scheduleVisualReset("TECHNICAL ERROR")
     }
 
     private fun configuredProfile(intent: Intent): AccessResource {
@@ -143,10 +149,11 @@ class GateReaderActivity : Activity(), GateReaderEvents {
 
     private fun buildScreen(): View {
         val root = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+        val sceneResource = sceneFor(profile.slug)
         root.addView(ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            setImageResource(sceneFor(profile.slug))
-            contentDescription = "${profile.displayName} original background asset slot"
+            setImageResource(sceneResource)
+            contentDescription = "${profile.displayName} original background"
         }, FrameLayout.LayoutParams(MATCH, MATCH))
         root.addView(View(this).apply {
             background = GradientDrawable(
@@ -169,7 +176,7 @@ class GateReaderActivity : Activity(), GateReaderEvents {
         })
         content.addView(label(sceneCaption(profile.slug), 13f, Color.argb(210, 255, 255, 255)))
 
-        door = GateDoorView(this, profile.slug)
+        door = GateDoorView(this, profile.slug, sceneResource)
         content.addView(door, LinearLayout.LayoutParams(MATCH, 0, 1f).apply {
             topMargin = dp(8)
             bottomMargin = dp(8)
@@ -192,7 +199,6 @@ class GateReaderActivity : Activity(), GateReaderEvents {
         }
         credentialText = value(); panel.addView(securityRow("Credential", credentialText))
         holderText = value(); panel.addView(securityRow("Holder", holderText))
-        registrationText = value(); panel.addView(securityRow("Registration", registrationText))
         globalText = value(); panel.addView(securityRow("Global Access", globalText))
         resourceText = value(); panel.addView(securityRow("Resource Access", resourceText))
         proofText = value(); panel.addView(securityRow("Proof", proofText))
@@ -241,6 +247,42 @@ class GateReaderActivity : Activity(), GateReaderEvents {
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
             )
         }
+    }
+
+    private fun scheduleVisualReset(result: String) {
+        cancelVisualReset()
+        var remaining = RESULT_HOLD_SECONDS
+        val task = object : Runnable {
+            override fun run() {
+                if (remaining == 0) {
+                    visualReset = null
+                    showReadyVisuals()
+                    return
+                }
+                statusText.text = "$result  •  NEXT SCAN IN ${remaining}s"
+                remaining -= 1
+                mainHandler.postDelayed(this, 1_000)
+            }
+        }
+        visualReset = task
+        mainHandler.post(task)
+    }
+
+    private fun cancelVisualReset() {
+        visualReset?.let(mainHandler::removeCallbacks)
+        visualReset = null
+    }
+
+    private fun showReadyVisuals() {
+        door.reset()
+        statusText.text = "READY — TAP LOCKENS PASS"
+        credentialText.text = "—"
+        holderText.text = "—"
+        globalText.text = "—"
+        resourceText.text = "—"
+        proofText.text = "—"
+        finalText.text = "—"
+        finalText.setTextColor(Color.WHITE)
     }
 
     private fun sceneFor(slug: String): Int = when (slug) {
@@ -293,6 +335,7 @@ class GateReaderActivity : Activity(), GateReaderEvents {
         const val PROFILE_PREFERENCES = "lockens_gate_stand"
         const val PROFILE_KEY = "resource_slug"
         const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
+        const val RESULT_HOLD_SECONDS = 10
         val GRANTED = Color.rgb(73, 225, 152)
         val DENIED = Color.rgb(255, 107, 107)
     }
