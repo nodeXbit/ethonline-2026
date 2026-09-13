@@ -10,10 +10,14 @@ import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
 import android.os.Bundle
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.RelativeSizeSpan
 import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -30,6 +34,7 @@ class GateReaderActivity : Activity(), GateReaderEvents {
     private lateinit var statusText: TextView
     private lateinit var credentialText: TextView
     private lateinit var holderText: TextView
+    private lateinit var registrationText: TextView
     private lateinit var globalText: TextView
     private lateinit var resourceText: TextView
     private lateinit var proofText: TextView
@@ -39,6 +44,7 @@ class GateReaderActivity : Activity(), GateReaderEvents {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         enterFullScreen()
         profile = configuredProfile(intent)
         controller = GateReaderController(
@@ -86,9 +92,10 @@ class GateReaderActivity : Activity(), GateReaderEvents {
             else -> value
         }
         if (value.startsWith("HOLDER")) {
-            door.reset()
+            door.showVerifying()
             credentialText.text = "READING…"
             holderText.text = "VERIFYING…"
+            registrationText.text = "PENDING"
             globalText.text = "PENDING"
             resourceText.text = "PENDING"
             proofText.text = "PENDING"
@@ -105,12 +112,13 @@ class GateReaderActivity : Activity(), GateReaderEvents {
     override fun decision(value: PixelGateDecision) = ui {
         Log.i(LOG_TAG, "decision=${value.reason} allowed=${value.allowed}")
         holderText.text = value.holder.uppercase()
+        registrationText.text = value.registration.uppercase()
         globalText.text = value.globalAccess.uppercase()
         resourceText.text = value.resourcePolicy.uppercase()
         proofText.text = value.proof.uppercase()
-        finalText.text = if (value.allowed) "ACCESS GRANTED" else "ACCESS DENIED\n${value.reason}"
+        finalText.text = decisionLabel(value)
         finalText.setTextColor(if (value.allowed) GRANTED else DENIED)
-        statusText.text = "VERIFIER TRANSPORT CONFIRMED"
+        statusText.text = if (value.allowed) "VIRTUAL GATE OPEN" else "VERIFIER TRANSPORT CONFIRMED"
         door.showAuthoritativeDecision(value.allowed)
     }
 
@@ -179,11 +187,12 @@ class GateReaderActivity : Activity(), GateReaderEvents {
 
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(12))
+            setPadding(dp(16), dp(9), dp(16), dp(9))
             background = rounded(Color.argb(225, 12, 18, 26), dp(20).toFloat(), Color.argb(80, 255, 255, 255))
         }
         credentialText = value(); panel.addView(securityRow("Credential", credentialText))
         holderText = value(); panel.addView(securityRow("Holder", holderText))
+        registrationText = value(); panel.addView(securityRow("Registration", registrationText))
         globalText = value(); panel.addView(securityRow("Global Access", globalText))
         resourceText = value(); panel.addView(securityRow("Resource Access", resourceText))
         proofText = value(); panel.addView(securityRow("Proof", proofText))
@@ -196,8 +205,8 @@ class GateReaderActivity : Activity(), GateReaderEvents {
     private fun securityRow(title: String, value: TextView): View = LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        minimumHeight = dp(38)
-        addView(label(title.uppercase(), 10f, Color.argb(175, 255, 255, 255)).apply {
+        minimumHeight = dp(34)
+        addView(label(title.uppercase(), 9f, Color.argb(175, 255, 255, 255)).apply {
             letterSpacing = 0.08f
         }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.37f))
         addView(value, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 0.63f))
@@ -221,6 +230,19 @@ class GateReaderActivity : Activity(), GateReaderEvents {
         setStroke(1, stroke)
     }
 
+    private fun decisionLabel(value: PixelGateDecision): CharSequence {
+        if (value.allowed) return "ACCESS GRANTED"
+        val label = "ACCESS DENIED\n${value.reason}"
+        return SpannableString(label).apply {
+            setSpan(
+                RelativeSizeSpan(0.72f),
+                label.indexOf('\n') + 1,
+                label.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+            )
+        }
+    }
+
     private fun sceneFor(slug: String): Int = when (slug) {
         "front-door" -> R.drawable.gate_scene_front_door
         "server-room" -> R.drawable.gate_scene_server_room
@@ -239,7 +261,8 @@ class GateReaderActivity : Activity(), GateReaderEvents {
         window.navigationBarColor = Color.BLACK
         window.decorView.systemUiVisibility =
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_FULLSCREEN or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

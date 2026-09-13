@@ -52,6 +52,7 @@ The security panel contains only:
 
 - Credential
 - Holder
+- Registration
 - Global Access
 - Resource Access
 - Proof
