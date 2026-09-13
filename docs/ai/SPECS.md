@@ -26,8 +26,10 @@ that directed implementation and bounded claims.
   local Node gate boundary.
 - [GATE_STAND.md](../../GATE_STAND.md) — persistent gate profiles and virtual-door
   semantics.
-- [DEMO_RUNBOOK.md](../../DEMO_RUNBOOK.md) — generic public demo workflow and
-  fail-closed operational expectations.
+- [ANDROID_GATE_DEMO_RUNBOOK.md](../../ANDROID_GATE_DEMO_RUNBOOK.md) — current
+  public runtime workflow for the final Android-holder/Android-gate demo.
+- [DEMO_RUNBOOK.md](../../DEMO_RUNBOOK.md) — historical ESP32-S3/PN532 public
+  demo runbook retained as engineering evidence.
 - [DYNAMIC_NFC_RUNBOOK.md](../../DYNAMIC_NFC_RUNBOOK.md) — historical dynamic
   NFC/PN532 procedure; retained for the alternate hardware route.
 - [scripts/ensv2/persistent-access.md](../../scripts/ensv2/persistent-access.md) —
@@ -53,8 +55,10 @@ ESP32-S3/PN532 route were tested.
 
 ## AI-direction evidence
 
-[PROMPTS.md](PROMPTS.md) preserves sanitized original excerpts from the material
-Control Tower task packets and the exact image-generation prompts. The excerpts
-show the implementation goals, authority boundaries, stop conditions, and
-validation requirements without publishing private operational identifiers or
-unrelated conversation.
+[PROMPTS.md](PROMPTS.md) indexes the complete available project-specific Control
+Tower task-packet corpus, in original order, plus the exact image-generation
+prompts. Each packet preserves its available original wording while replacing
+private material with explicit redaction markers. The corpus shows the
+implementation goals, authority boundaries, stop conditions, and validation
+requirements without publishing private operational identifiers or unrelated
+conversation.

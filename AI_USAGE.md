@@ -51,7 +51,8 @@ only after participant observation.
 ## Specifications and prompts
 
 The repository's genuine planning and evidence documents are indexed in
-[docs/ai/SPECS.md](docs/ai/SPECS.md). Sanitized original task-packet excerpts and
-the exact Gate Stand image prompts are in
+[docs/ai/SPECS.md](docs/ai/SPECS.md). The complete available project-specific
+task-packet corpus, sanitized with explicit redaction markers, and the exact
+Gate Stand image prompts are in
 [docs/ai/PROMPTS.md](docs/ai/PROMPTS.md). Private operational values, unrelated
 conversation, account data, and credentials are intentionally excluded.

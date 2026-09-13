@@ -1,5 +1,13 @@
 # Local demo runbook
 
+> **HISTORICAL / ALTERNATE PN532 DEMO RUNBOOK**
+>
+> The final ETHOnline release uses one Android holder and three Android Gate
+> Stand devices with the local Node verifier. Use the current public
+> [Android gate demo runbook](ANDROID_GATE_DEMO_RUNBOOK.md). The historical body
+> below is retained as engineering evidence for the alternate ESP32-S3/PN532
+> path; it does not describe the final release runtime.
+
 Use `guest-001.demo-access.eth`, holder `0x3419148731087b970d2059C53780163B452D5FF7`,
 resource `demo-access.eth:door-001`, on Sepolia. Generic `cred-001` commands remain separate.
 Run commands from the repository root. Keep `.env.local` and `.env.nfc.local` private;

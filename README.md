@@ -114,8 +114,10 @@ npm run pixel-gate:bridge
 
 Generic setup and architecture references are documented in
 [ANDROID_GATE_READER.md](ANDROID_GATE_READER.md), [GATE_STAND.md](GATE_STAND.md),
-and [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md). Device-specific recording-day data stays
-under ignored `.runtime/` files.
+and [ANDROID_GATE_DEMO_RUNBOOK.md](ANDROID_GATE_DEMO_RUNBOOK.md). The root
+[DEMO_RUNBOOK.md](DEMO_RUNBOOK.md) is retained only for the historical/alternate
+ESP32-S3 + PN532 workflow. Device-specific recording-day data stays under ignored
+`.runtime/` files.
 
 ## Evidence and limitations
 
