@@ -27,7 +27,8 @@
         <activity
             android:name=".gate.GateReaderActivity"
             android:exported="true"
-            android:launchMode="singleTop" />
+            android:launchMode="singleTop"
+            android:screenOrientation="portrait" />
         <service
             android:name=".hce.GateC1HostApduService"
             android:exported="true"

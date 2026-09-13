@@ -79,6 +79,19 @@ test('valid proof completion remains subject to the existing resource policy ver
   assert.equal(result.body.checks.holder, 'Verified');
   assert.equal(result.body.checks.registration, 'Valid');
   assert.equal(result.body.checks.globalAccess, 'Allowed');
+  assert.equal(result.body.checks.resourcePolicy, 'Missing');
+  assert.equal(result.body.checks.proof, 'Fresh');
+});
+test('one Node service isolates concurrent Front Door Lab and Server Room sessions', async () => {
+  const h = harness({ resourcePolicy: [] });
+  const slugs = ['front-door', 'lab', 'server-room'];
+  const sessions = await Promise.all(slugs.map(slug => start(h, slug)));
+  assert.equal(new Set(sessions.map(value => value.sessionId)).size, 3);
+  assert.deepEqual(sessions.map(value => value.resource.slug), slugs);
+  assert.equal(new Set(sessions.map(value => value.challenge.slice(66, 130))).size, 3);
+  const results = await Promise.all(sessions.map(async value =>
+    h.service.complete({ sessionId: value.sessionId, signature: await sign(value) })));
+  assert.deepEqual(results.map(value => value.body.reason), slugs.map(() => 'RESOURCE_NOT_ALLOWED'));
 });
 test('completed session rejects replay', async () => {
   const h = harness(); const created = await start(h); const signature = await sign(created);

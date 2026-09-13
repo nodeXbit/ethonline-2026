@@ -158,7 +158,9 @@ class GateReaderControllerTest {
         }
         override fun complete(sessionId: String, signature: ByteArray): PixelGateDecision {
             completes++
-            return PixelGateDecision(false, "RESOURCE_POLICY_MISSING", "Verified", "Valid", "Allowed", "Not checked")
+            return PixelGateDecision(
+                false, "RESOURCE_POLICY_MISSING", "Verified", "Valid", "Allowed", "Missing", "Fresh",
+            )
         }
     }
 

@@ -24,14 +24,16 @@ function challengeHex(challenge) {
 }
 
 function publicResult(result) {
+  const reason = typeof result.reason === 'string' ? result.reason : 'VERIFIER_ERROR';
   return {
     allowed: result.allowed === true,
-    reason: typeof result.reason === 'string' ? result.reason : 'VERIFIER_ERROR',
+    reason,
     checks: {
       holder: result.checks?.holder ?? 'Not checked',
       registration: result.checks?.registration ?? 'Not checked',
       globalAccess: result.checks?.globalAccess ?? 'Not checked',
-      resourcePolicy: result.checks?.resourcePolicy ?? 'Not checked',
+      resourcePolicy: reason === 'RESOURCE_POLICY_MISSING'
+        ? 'Missing' : (result.checks?.resourcePolicy ?? 'Not checked'),
       proof: result.checks?.proof ?? 'Not checked',
     },
     ...(typeof result.snapshotBlock === 'string' ? { snapshotBlock: result.snapshotBlock } : {}),

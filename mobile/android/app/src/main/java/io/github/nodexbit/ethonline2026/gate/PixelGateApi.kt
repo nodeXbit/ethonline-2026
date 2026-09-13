@@ -17,6 +17,7 @@ data class PixelGateDecision(
     val registration: String,
     val globalAccess: String,
     val resourcePolicy: String,
+    val proof: String,
 )
 
 interface PixelGateApi {
@@ -55,6 +56,7 @@ class PixelGateHttpApi(private val baseUrl: String = "http://127.0.0.1:8792") : 
             registration = checks.getString("registration"),
             globalAccess = checks.getString("globalAccess"),
             resourcePolicy = checks.getString("resourcePolicy"),
+            proof = checks.getString("proof"),
         )
     }
 
